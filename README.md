@@ -46,10 +46,10 @@ python standalone/rsl_rl/train.py --task=Template-Isaac-Velocity-Rough-Anymal-D-
 - Training and evluation for Racing
 1. Click 'run and debug' button in vscode.
 2. Drop down menu, select stage 0, and then click on start debugging.
-3. See corrsponding options in [launch.json](xxx).
+3. See corrsponding options in [launch.json](.vscode/launch.json).
 
 ## License
-The MasterRacing framework is released under [MIT License](xxx). The license files of its dependencies and assets are present in the [here](https://github.com/isaac-sim/IsaacLab/blob/main/docs/licenses).
+The MasterRacing framework is released under [MIT License](LICENSE). The license files of its dependencies and assets are present in the [here](https://github.com/isaac-sim/IsaacLab/blob/main/docs/licenses).
 
 Note that our framework requires Isaac Sim, which includes components under proprietary licensing terms. Please see the [Isaac Sim license](https://github.com/isaac-sim/IsaacLab/blob/main/docs/licenses/dependencies/isaacsim-license.txt) for information on Isaac Sim licensing.
 
