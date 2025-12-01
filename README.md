@@ -7,16 +7,14 @@
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/license/mit)
 
-<video width="720" height="480" controls>
-<source src="https://www.youtube.com/watch?v=qxpx5dXtpNk" type="video/mp4">
-</video>
+[![IMAGE ALT TEXT HERE](docs/assets/cover.png)](https://youtu.be/qxpx5dXtpNk)
 
 ## Abstract
+```
 Most reinforcement learning (RL)-based methods for drone racing target fixed, obstacle-free tracks, leaving the generalization to unknown, cluttered environments largely unaddressed.  This challenge stems from the need to balance racing speed and collision avoidance, limited feasible space causing policy exploration trapped in local optima during training, and perceptual ambiguity between gates and obstacles in depth maps-especially when gate positions are only coarsely specified.
 To overcome these issues, we propose a two-phase learning framework: an initial soft-collision training phase that preserves policy exploration for high-speed flight, followed by a hard-collision refinement phase that enforces robust obstacle avoidance. An adaptive, noise-augmented curriculum with an asymmetric actor-critic architecture gradually shifts the policy’s reliance from privileged gate-state information to depth-based visual input. We further impose Lipschitz constraints and integrate a track-primitive generator to enhance motion stability and cross-environment generalization.
-We evaluate our framework through extensive simulation and ablation studies, and validate it in real-world experiments on a computationally constrained quadrotor. The system achieves agile flight while remaining robust to gate-position errors, 
-developing a generalizable drone racing framework with the capability to operate in diverse, partially unknown and cluttered environments.
-
+We evaluate our framework through extensive simulation and ablation studies, and validate it in real-world experiments on a computationally constrained quadrotor. The system achieves agile flight while remaining robust to gate-position errors, developing a generalizable drone racing framework with the capability to operate in diverse, partially unknown and cluttered environments.
+```
 ## Installation
 
 - install IsaacSim and IsaacLab [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html#local-installation), we recommend install them using anaconda.
