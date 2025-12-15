@@ -11,6 +11,12 @@ from isaaclab.managers import ActionTerm
 from diff.lab.controllers import ThrustController, PSController, LVController, CTBRController
 from ..dynamics.droneDynamics import DroneDynamics
 
+# Isaac Lab 2.3.0 (Isaac Sim 4.5) lacks quat_apply_inverse; provide a fallback.
+if not hasattr(math_utils, "quat_apply_inverse"):
+    def _quat_apply_inverse(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
+        return math_utils.quat_apply(math_utils.quat_inv(quat), vec)
+    math_utils.quat_apply_inverse = _quat_apply_inverse
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from .diff_action_cfg import DiffActionCfg

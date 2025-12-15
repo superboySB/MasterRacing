@@ -23,8 +23,13 @@ from typing import TYPE_CHECKING
 from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm
 from isaaclab.markers import VisualizationMarkers
-from isaaclab.utils.math import compute_pose_error, quat_from_euler_xyz, quat_unique, quat_apply_inverse, quat_mul, quat_inv, yaw_quat, quat_apply
+from isaaclab.utils.math import compute_pose_error, quat_from_euler_xyz, quat_unique, quat_mul, quat_inv, yaw_quat, quat_apply
 from .rewards import command_rate_penalty
+
+
+def quat_apply_inverse(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
+    """Apply inverse quaternion rotation to a vector (world to body)."""
+    return quat_apply(quat_inv(quat), vec)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv

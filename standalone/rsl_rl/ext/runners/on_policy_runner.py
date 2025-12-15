@@ -33,10 +33,8 @@ class OnPolicyRunner:
             self.training_type = "distillation"
         else:
             raise ValueError(f"Training type not found for algorithm {self.alg_cfg['class_name']}.")
-        
-        obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"]
-        extras = {"observations":{"policy": obs}}
+
+        obs, extras = self._unpack_obs(self.env.get_observations())
         num_obs = obs.shape[1]
 
         # resolve type of privileged observations
@@ -90,6 +88,19 @@ class OnPolicyRunner:
         self.current_learning_iteration = 0
         self.git_status_repos = []
 
+    def _unpack_obs(self, obs_out):
+        """Handle obs from env wrappers (dict or (tensor, extras))."""
+        if isinstance(obs_out, tuple) and len(obs_out) == 2:
+            obs, extras = obs_out
+            if "observations" not in extras:
+                extras = {"observations": extras}
+        elif isinstance(obs_out, dict):
+            obs = obs_out["policy"]
+            extras = {"observations": obs_out}
+        else:
+            raise ValueError(f"Unsupported observation return type: {type(obs_out)}")
+        return obs, extras
+
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
@@ -120,9 +131,7 @@ class OnPolicyRunner:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)
             )
-        obs_dict = self.env.get_observations()
-        obs = obs_dict["policy"]
-        extras = {"observations":{"policy": obs}}
+        obs, extras = self._unpack_obs(self.env.get_observations())
         privileged_obs = extras["observations"].get(self.privileged_obs_type, obs)
         obs, privileged_obs = obs.to(self.device), privileged_obs.to(self.device)
         self.train_mode()  # switch to train mode (for dropout for example)
@@ -144,7 +153,7 @@ class OnPolicyRunner:
                     actions = self.alg.act(obs, privileged_obs)
                     # Step the environment
                     obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
-                    obs = obs["policy"]
+                    # obs already a tensor from the wrapper
                     # move to the right device
                     obs, rewards, dones = (
                         obs.to(self.device),

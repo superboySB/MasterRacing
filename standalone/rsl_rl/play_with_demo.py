@@ -7,7 +7,7 @@ import argparse
 from isaaclab.app import AppLauncher
 
 # local imports
-import cli_args  # isort: skip
+from . import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")

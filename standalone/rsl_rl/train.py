@@ -15,7 +15,7 @@ import isaacsim
 import isaaclab
 
 # local imports
-import cli_args  # isort: skip
+from . import cli_args  # isort: skip
 
 
 # add argparse arguments
