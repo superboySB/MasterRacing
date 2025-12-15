@@ -1,0 +1,1122 @@
+/*****************************************************************************
+*     Copyright 2024 NVIDIA Corporation. All rights reserved.
+******************************************************************************
+
+ MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,
+ WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,
+ THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+ COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA
+ CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING
+ ANY GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
+ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+ THE USE OR INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN
+ THE MDL MATERIALS.
+*/
+mdl 1.4;
+
+import ::anno::*;
+import ::base::*;
+import ::nvidia::core_definitions::*;
+import ::tex::*;
+import ::state::*;
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+export material Ground_Leaves(
+
+    /*     Appearance                                         */
+    color hue_shift = color (0.0461, 0.349, 0.263 )
+    [[
+        ::anno::display_name ("Hue Shift"),
+        ::anno::description("Determine the color of the leaves."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float blend_undercoat = 1.0f
+    [[
+        ::anno::display_name("Leaf Saturation"),
+        ::anno::description("Makes the Hue Shift more saturated."),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float reflection_roughness = 1.0
+    [[
+        ::anno::display_name("Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::hard_range(0.f, 1.f),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength = 1.0
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+		::anno::soft_range(0.f, 2.f),
+        ::anno::in_group("Appearance")
+    ]],
+    /*     Transform                                         */
+    uniform float2 texture_translate =  float2 ( 0.f)
+    [[
+		::anno::display_name("Translate"),
+        ::anno::description("Controls the position of the texture."),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float texture_rotate =  0.f
+    [[
+        ::anno::display_name("Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float2 texture_scale =  float2 ( 1.f)
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the size."),
+        ::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+    ]],
+/*     Advanced                                         */
+    uniform float displacement_scale = 0.1f
+    [[
+        ::anno::display_name("Displacement Scale"),
+        ::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+        ::anno::in_group("Advanced")
+    ]],
+    uniform int uv_space_index =  0
+    [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("UV space index."),
+        ::anno::in_group("Advanced"),
+        ::anno::hard_range(0, 3)
+    ]]
+)
+    [[
+		::anno::author("NVIDIA vMaterials"),
+        ::anno::display_name("Leaves - Forest Green"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.Ground_Leaves.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "green"))
+    ]]=
+    ::nvidia::core_definitions::add_displacement(
+        base:  ::nvidia::core_definitions::flex_material_v2(
+            base_color:  ::nvidia::core_definitions::blend_colors(
+                color_1:  ::nvidia::core_definitions::blend_colors(
+                    color_1: ::nvidia::core_definitions::file_texture(
+                            texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  1.f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space:  uv_space_index,
+                            invert:  false).tint,
+                    color_2: ::nvidia::core_definitions::blend_colors(
+                        color_1:  ::nvidia::core_definitions::file_texture(
+                            texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  1.f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale ,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space: uv_space_index,
+                            invert:  false).tint,
+                        color_2:  hue_shift,
+                        mode: ::base::color_layer_overlay,
+                        weight: 1.0f).tint,
+                    mode:  ::base::color_layer_overlay,
+                    weight:  ::nvidia::core_definitions::file_texture(
+                        texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                        mono_source:  ::base::mono_average,
+                        brightness:  blend_undercoat * 2.0f,
+                        contrast:  1.f,
+                        scaling:  1.f / texture_scale,
+                        translation:  texture_translate,
+                        rotation:  texture_rotate,
+                        clip:  false,
+                        texture_space:  uv_space_index,
+                        invert:  false).mono).tint,
+            color_2:  ::nvidia::core_definitions::file_texture(
+                    texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+                    mono_source:  ::base::mono_average,
+                    brightness:  1.f,
+                    contrast:  1.f,
+                    scaling:  1.f / texture_scale,
+                    translation:  texture_translate,
+                    rotation:  texture_rotate,
+                    clip:  false,
+                    texture_space:  uv_space_index,
+                    invert:  false).tint,
+            mode:  ::base::color_layer_multiply,
+            weight:  1.0f).tint,
+        diffuse_roughness:  0.0f,
+        is_metal:  false, 
+        reflectivity:  ::nvidia::core_definitions::file_texture(
+            texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  1.f,
+            contrast:  1.f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        reflection_roughness:  ::nvidia::core_definitions::file_texture(
+            texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  reflection_roughness,
+            contrast:  1.f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        anisotropy:  0.0f,
+        anisotropy_rotation:  0.0f,
+        transparency:  0.0f,
+        transmission_color:  color(1.0f, 1.0f, 1.0f),
+        volume_color:  color(1.0f, 1.0f, 1.0f),
+        transmission_roughness:  0.0f,
+        base_thickness:  0.1f,
+        ior:  1.5f,
+        thin_walled:  false,
+        normal:  ::nvidia::core_definitions::normalmap_texture(
+            texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+            factor:  bump_strength,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index)),
+    displacement:  ::nvidia::core_definitions::file_texture(
+        texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+        mono_source:  ::base::mono_average,
+        brightness:  1.0f,
+        contrast:  1.0f,
+        scaling:  1.f / texture_scale,
+        translation:  texture_translate,
+        rotation:  texture_rotate,
+        clip:  false,
+        texture_space:  uv_space_index,
+        invert:  false).mono,
+    displacement_scale: displacement_scale);
+
+
+export material ground_leaves_green(
+    
+        /*     Appearance                                         */
+        color hue_shift = color (0.00604f , 1.f , 0.f )
+        [[
+            ::anno::display_name ("Hue Shift"),
+            ::anno::description("Determine the color of the leaves."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float blend_undercoat = 0.75f
+        [[
+            ::anno::display_name("Leaf Saturation"),
+            ::anno::description("Makes the Hue Shift more saturated."),
+            ::anno::in_group("Appearance"),
+            ::anno::hard_range( 0 , 1)
+        ]],
+        uniform float reflection_roughness = 1.0
+        [[
+            ::anno::display_name("Roughness"),
+            ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float bump_strength = 1.0
+        [[
+            ::anno::display_name("Bump Strength"),
+            ::anno::description("Specifies the strength of the bump."),
+            ::anno::in_group("Appearance")
+        ]],
+        /*     Transform                                         */
+        uniform float2 texture_translate =  float2 ( 0.f)
+        [[
+            ::anno::display_name("Translate"),
+            ::anno::description("Controls the position of the texture."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float texture_rotate =  0.f
+        [[
+            ::anno::display_name("Rotate"),
+            ::anno::description("Rotates angle of the texture in degrees."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float2 texture_scale =  float2 ( 1.f)
+        [[
+            ::anno::display_name("Scale"),
+            ::anno::description("Larger numbers increase the size."),
+            ::anno::in_group("Transform"),
+			::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+        ]],
+    /*     Advanced                                         */
+        uniform float displacement_scale = 0.1f
+        [[
+            ::anno::display_name("Displacement Scale"),
+            ::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+            ::anno::in_group("Advanced")
+        ]],
+        uniform int uv_space_index =  0
+        [[
+            ::anno::display_name("UV Space Index"),
+            ::anno::description("UV space index."),
+            ::anno::in_group("Advanced"),
+            ::anno::hard_range(0, 3)
+        ]]
+    )
+	[[
+		::anno::display_name("Leaves - Green"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::author("NVIDIA vMaterials"),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.ground_leaves_green.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "green"))
+	]]=
+        ::nvidia::core_definitions::add_displacement(
+            base:  ::nvidia::core_definitions::flex_material_v2(
+                base_color:  ::nvidia::core_definitions::blend_colors(
+                    color_1:  ::nvidia::core_definitions::blend_colors(
+                        color_1: ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space:  uv_space_index,
+                                invert:  false).tint,
+                        color_2: ::nvidia::core_definitions::blend_colors(
+                            color_1:  ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale ,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space: uv_space_index,
+                                invert:  false).tint,
+                            color_2:  hue_shift,
+                            mode: ::base::color_layer_overlay,
+                            weight: 1.0f).tint,
+                        mode:  ::base::color_layer_overlay,
+                        weight:  ::nvidia::core_definitions::file_texture(
+                            texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  blend_undercoat * 2.0f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space:  uv_space_index,
+                            invert:  false).mono).tint,
+                color_2:  ::nvidia::core_definitions::file_texture(
+                        texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+                        mono_source:  ::base::mono_average,
+                        brightness:  1.f,
+                        contrast:  1.f,
+                        scaling:  1.f / texture_scale,
+                        translation:  texture_translate,
+                        rotation:  texture_rotate,
+                        clip:  false,
+                        texture_space:  uv_space_index,
+                        invert:  false).tint,
+                mode:  ::base::color_layer_multiply,
+                weight:  1.0f).tint,
+            diffuse_roughness:  0.0f,
+            is_metal:  false, 
+            reflectivity:  ::nvidia::core_definitions::file_texture(
+                texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  1.f,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            reflection_roughness:  ::nvidia::core_definitions::file_texture(
+                texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  reflection_roughness,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            anisotropy:  0.0f,
+            anisotropy_rotation:  0.0f,
+            transparency:  0.0f,
+            transmission_color:  color(1.0f, 1.0f, 1.0f),
+            volume_color:  color(1.0f, 1.0f, 1.0f),
+            transmission_roughness:  0.0f,
+            base_thickness:  0.1f,
+            ior:  1.5f,
+            thin_walled:  false,
+            normal:  ::nvidia::core_definitions::normalmap_texture(
+                texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+                factor:  bump_strength,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index)),
+        displacement:  ::nvidia::core_definitions::file_texture(
+            texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  1.0f,
+            contrast:  1.0f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        displacement_scale: displacement_scale);
+
+
+export material ground_leaves_yellow(
+    
+        /*     Appearance                                         */
+        color hue_shift = color (1.f , 0.883f , 0.0104f )
+        [[
+            ::anno::display_name ("Hue Shift"),
+            ::anno::description("Determine the color of the leaves."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float blend_undercoat = 0.5f
+        [[
+            ::anno::display_name("Leaf Saturation"),
+            ::anno::description("Makes the Hue Shift more saturated."),
+            ::anno::in_group("Appearance"),
+            ::anno::hard_range( 0 , 1)
+        ]],
+        uniform float reflection_roughness = 1.0
+        [[
+            ::anno::display_name("Roughness"),
+            ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float bump_strength = 1.0
+        [[
+            ::anno::display_name("Bump Strength"),
+            ::anno::description("Specifies the strength of the bump."),
+            ::anno::in_group("Appearance")
+        ]],
+        /*     Transform                                         */
+        uniform float2 texture_translate =  float2 ( 0.f)
+        [[
+            ::anno::display_name("Translate"),
+            ::anno::description("Controls the position of the texture."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float texture_rotate =  0.f
+        [[
+            ::anno::display_name("Rotate"),
+            ::anno::description("Rotates angle of the texture in degrees."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float2 texture_scale =  float2 ( 1.f)
+        [[
+            ::anno::display_name("Scale"),
+            ::anno::description("Larger numbers increase the size."),
+            ::anno::in_group("Transform"),
+			::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+        ]],
+    /*     Advanced                                         */
+        uniform float displacement_scale = 0.1f
+        [[
+            ::anno::display_name("Displacement Scale"),
+            ::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+            ::anno::in_group("Advanced")
+        ]],
+        uniform int uv_space_index =  0
+        [[
+            ::anno::display_name("UV Space Index"),
+            ::anno::description("UV space index."),
+            ::anno::in_group("Advanced"),
+            ::anno::hard_range(0, 3)
+        ]]
+    )
+	[[
+		::anno::author("NVIDIA vMaterials"),
+		::anno::display_name("Leaves - Forest Yellow"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.ground_leaves_yellow.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "yellow"))
+	]]=
+        ::nvidia::core_definitions::add_displacement(
+            base:  ::nvidia::core_definitions::flex_material_v2(
+                base_color:  ::nvidia::core_definitions::blend_colors(
+                    color_1:  ::nvidia::core_definitions::blend_colors(
+                        color_1: ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space:  uv_space_index,
+                                invert:  false).tint,
+                        color_2: ::nvidia::core_definitions::blend_colors(
+                            color_1:  ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale ,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space: uv_space_index,
+                                invert:  false).tint,
+                            color_2:  hue_shift,
+                            mode: ::base::color_layer_overlay,
+                            weight: 1.0f).tint,
+                        mode:  ::base::color_layer_overlay,
+                        weight:  ::nvidia::core_definitions::file_texture(
+                            texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  blend_undercoat * 2.0f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space:  uv_space_index,
+                            invert:  false).mono).tint,
+                color_2:  ::nvidia::core_definitions::file_texture(
+                        texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+                        mono_source:  ::base::mono_average,
+                        brightness:  1.f,
+                        contrast:  1.f,
+                        scaling:  1.f / texture_scale,
+                        translation:  texture_translate,
+                        rotation:  texture_rotate,
+                        clip:  false,
+                        texture_space:  uv_space_index,
+                        invert:  false).tint,
+                mode:  ::base::color_layer_multiply,
+                weight:  1.0f).tint,
+            diffuse_roughness:  0.0f,
+            is_metal:  false, 
+            reflectivity:  ::nvidia::core_definitions::file_texture(
+                texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  1.f,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            reflection_roughness:  ::nvidia::core_definitions::file_texture(
+                texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  reflection_roughness,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            anisotropy:  0.0f,
+            anisotropy_rotation:  0.0f,
+            transparency:  0.0f,
+            transmission_color:  color(1.0f, 1.0f, 1.0f),
+            volume_color:  color(1.0f, 1.0f, 1.0f),
+            transmission_roughness:  0.0f,
+            base_thickness:  0.1f,
+            ior:  1.5f,
+            thin_walled:  false,
+            normal:  ::nvidia::core_definitions::normalmap_texture(
+                texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+                factor:  bump_strength,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index)),
+        displacement:  ::nvidia::core_definitions::file_texture(
+            texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  1.0f,
+            contrast:  1.0f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        displacement_scale: displacement_scale);
+
+
+export material ground_leaves_orange(
+    
+        /*     Appearance                                         */
+        color hue_shift = color (1.f, 0.267f, 0.0385f )
+        [[
+            ::anno::display_name ("Hue Shift"),
+            ::anno::description("Determine the color of the leaves."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float blend_undercoat = 0.75f
+        [[
+            ::anno::display_name("Leaf Saturation"),
+            ::anno::description("Makes the Hue Shift more saturated."),
+            ::anno::in_group("Appearance"),
+            ::anno::hard_range( 0 , 1)
+        ]],
+        uniform float reflection_roughness = 1.0
+        [[
+            ::anno::display_name("Roughness"),
+            ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float bump_strength = 1.0
+        [[
+            ::anno::display_name("Bump Strength"),
+            ::anno::description("Specifies the strength of the bump."),
+            ::anno::in_group("Appearance")
+        ]],
+        /*     Transform                                         */
+        uniform float2 texture_translate =  float2 ( 0.f)
+        [[
+            ::anno::display_name("Translate"),
+            ::anno::description("Controls the position of the texture."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float texture_rotate =  0.f
+        [[
+            ::anno::display_name("Rotate"),
+            ::anno::description("Rotates angle of the texture in degrees."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float2 texture_scale =  float2 ( 1.f)
+        [[
+            ::anno::display_name("Scale"),
+            ::anno::description("Larger numbers increase the size."),
+            ::anno::in_group("Transform"),
+			::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+        ]],
+    /*     Advanced                                         */
+        uniform float displacement_scale = 0.1f
+        [[
+            ::anno::display_name("Displacement Scale"),
+            ::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+            ::anno::in_group("Advanced")
+        ]],
+        uniform int uv_space_index =  0
+        [[
+            ::anno::display_name("UV Space Index"),
+            ::anno::description("UV space index."),
+            ::anno::in_group("Advanced"),
+            ::anno::hard_range(0, 3)
+        ]]
+    )
+	[[
+		::anno::author("NVIDIA vMaterials"),
+		::anno::display_name("Leaves - Orange"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.ground_leaves_orange.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "orange", "brown"))
+	]]=
+        ::nvidia::core_definitions::add_displacement(
+            base:  ::nvidia::core_definitions::flex_material_v2(
+                base_color:  ::nvidia::core_definitions::blend_colors(
+                    color_1:  ::nvidia::core_definitions::blend_colors(
+                        color_1: ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space:  uv_space_index,
+                                invert:  false).tint,
+                        color_2: ::nvidia::core_definitions::blend_colors(
+                            color_1:  ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale ,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space: uv_space_index,
+                                invert:  false).tint,
+                            color_2:  hue_shift,
+                            mode: ::base::color_layer_overlay,
+                            weight: 1.0f).tint,
+                        mode:  ::base::color_layer_overlay,
+                        weight:  ::nvidia::core_definitions::file_texture(
+                            texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  blend_undercoat * 2.0f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space:  uv_space_index,
+                            invert:  false).mono).tint,
+                color_2:  ::nvidia::core_definitions::file_texture(
+                        texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+                        mono_source:  ::base::mono_average,
+                        brightness:  1.f,
+                        contrast:  1.f,
+                        scaling:  1.f / texture_scale,
+                        translation:  texture_translate,
+                        rotation:  texture_rotate,
+                        clip:  false,
+                        texture_space:  uv_space_index,
+                        invert:  false).tint,
+                mode:  ::base::color_layer_multiply,
+                weight:  1.0f).tint,
+            diffuse_roughness:  0.0f,
+            is_metal:  false, 
+            reflectivity:  ::nvidia::core_definitions::file_texture(
+                texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  1.f,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            reflection_roughness:  ::nvidia::core_definitions::file_texture(
+                texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  reflection_roughness,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            anisotropy:  0.0f,
+            anisotropy_rotation:  0.0f,
+            transparency:  0.0f,
+            transmission_color:  color(1.0f, 1.0f, 1.0f),
+            volume_color:  color(1.0f, 1.0f, 1.0f),
+            transmission_roughness:  0.0f,
+            base_thickness:  0.1f,
+            ior:  1.5f,
+            thin_walled:  false,
+            normal:  ::nvidia::core_definitions::normalmap_texture(
+                texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+                factor:  bump_strength,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index)),
+        displacement:  ::nvidia::core_definitions::file_texture(
+            texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  1.0f,
+            contrast:  1.0f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        displacement_scale: displacement_scale);
+
+
+export material ground_leaves_red(
+    
+        /*     Appearance                                         */
+        color hue_shift = color (0.459f , 0.0278f , 0.0278f)
+        [[
+            ::anno::display_name ("Hue Shift"),
+            ::anno::description("Determine the color of the leaves."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float blend_undercoat = 1.0f
+        [[
+            ::anno::display_name("Leaf Saturation"),
+            ::anno::description("Makes the Hue Shift more saturated."),
+            ::anno::in_group("Appearance"),
+            ::anno::hard_range( 0 , 1)
+        ]],
+        uniform float reflection_roughness = 1.0
+        [[
+            ::anno::display_name("Roughness"),
+            ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+            ::anno::in_group("Appearance")
+        ]],
+        uniform float bump_strength = 1.0
+        [[
+            ::anno::display_name("Bump Strength"),
+            ::anno::description("Specifies the strength of the bump."),
+            ::anno::in_group("Appearance")
+        ]],
+        /*     Transform                                         */
+        uniform float2 texture_translate =  float2 ( 0.f)
+        [[
+            ::anno::display_name("Translate"),
+            ::anno::description("Controls the position of the texture."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float texture_rotate =  0.f
+        [[
+            ::anno::display_name("Rotate"),
+            ::anno::description("Rotates angle of the texture in degrees."),
+            ::anno::in_group("Transform")
+        ]],
+        uniform float2 texture_scale =  float2 ( 1.f)
+        [[
+            ::anno::display_name("Scale"),
+            ::anno::description("Larger numbers increase the size."),
+            ::anno::in_group("Transform"),
+			::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+        ]],
+    /*     Advanced                                         */
+        uniform float displacement_scale = 0.1f
+        [[
+            ::anno::display_name("Displacement Scale"),
+            ::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+            ::anno::in_group("Advanced")
+        ]],
+        uniform int uv_space_index =  0
+        [[
+            ::anno::display_name("UV Space Index"),
+            ::anno::description("UV space index."),
+            ::anno::in_group("Advanced"),
+            ::anno::hard_range(0, 3)
+        ]]
+    )
+        [[
+		::anno::author("NVIDIA vMaterials"),
+		::anno::display_name("Leaves - Red"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.ground_leaves_red.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "red", "brown"))
+        ]]=
+        ::nvidia::core_definitions::add_displacement(
+            base:  ::nvidia::core_definitions::flex_material_v2(
+                base_color:  ::nvidia::core_definitions::blend_colors(
+                    color_1:  ::nvidia::core_definitions::blend_colors(
+                        color_1: ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space:  uv_space_index,
+                                invert:  false).tint,
+                        color_2: ::nvidia::core_definitions::blend_colors(
+                            color_1:  ::nvidia::core_definitions::file_texture(
+                                texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+                                mono_source:  ::base::mono_average,
+                                brightness:  1.f,
+                                contrast:  1.f,
+                                scaling:  1.f / texture_scale ,
+                                translation:  texture_translate,
+                                rotation:  texture_rotate,
+                                clip:  false,
+                                texture_space: uv_space_index,
+                                invert:  false).tint,
+                            color_2:  hue_shift,
+                            mode: ::base::color_layer_overlay,
+                            weight: 1.0f).tint,
+                        mode:  ::base::color_layer_overlay,
+                        weight:  ::nvidia::core_definitions::file_texture(
+                            texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                            mono_source:  ::base::mono_average,
+                            brightness:  blend_undercoat * 2.0f,
+                            contrast:  1.f,
+                            scaling:  1.f / texture_scale,
+                            translation:  texture_translate,
+                            rotation:  texture_rotate,
+                            clip:  false,
+                            texture_space:  uv_space_index,
+                            invert:  false).mono).tint,
+                color_2:  ::nvidia::core_definitions::file_texture(
+                        texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+                        mono_source:  ::base::mono_average,
+                        brightness:  1.f,
+                        contrast:  1.f,
+                        scaling:  1.f / texture_scale,
+                        translation:  texture_translate,
+                        rotation:  texture_rotate,
+                        clip:  false,
+                        texture_space:  uv_space_index,
+                        invert:  false).tint,
+                mode:  ::base::color_layer_multiply,
+                weight:  1.0f).tint,
+            diffuse_roughness:  0.0f,
+            is_metal:  false, 
+            reflectivity:  ::nvidia::core_definitions::file_texture(
+                texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  1.f,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            reflection_roughness:  ::nvidia::core_definitions::file_texture(
+                texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+                mono_source:  ::base::mono_average,
+                brightness:  reflection_roughness,
+                contrast:  1.f,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index,
+                invert:  false).mono,
+            anisotropy:  0.0f,
+            anisotropy_rotation:  0.0f,
+            transparency:  0.0f,
+            transmission_color:  color(1.0f, 1.0f, 1.0f),
+            volume_color:  color(1.0f, 1.0f, 1.0f),
+            transmission_roughness:  0.0f,
+            base_thickness:  0.1f,
+            ior:  1.5f,
+            thin_walled:  false,
+            normal:  ::nvidia::core_definitions::normalmap_texture(
+                texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+                factor:  bump_strength,
+                scaling:  1.f / texture_scale,
+                translation:  texture_translate,
+                rotation:  texture_rotate,
+                clip:  false,
+                texture_space:  uv_space_index)),
+        displacement:  ::nvidia::core_definitions::file_texture(
+            texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+            mono_source:  ::base::mono_average,
+            brightness:  1.0f,
+            contrast:  1.0f,
+            scaling:  1.f / texture_scale,
+            translation:  texture_translate,
+            rotation:  texture_rotate,
+            clip:  false,
+            texture_space:  uv_space_index,
+            invert:  false).mono,
+        displacement_scale: displacement_scale);
+
+export material ground_leaves_blue(
+	
+	/*     Appearance                                         */
+	color hue_shift = color (0.0104f, 0.136f, 0.828f)
+	[[
+		::anno::display_name ("Hue Shift"),
+		::anno::description("Determine the color of the leaves."),
+		::anno::in_group("Appearance")
+	]],
+	uniform float blend_undercoat = 1.0f
+	[[
+		::anno::display_name("Leaf Saturation"),
+		::anno::description("Makes the Hue Shift more saturated."),
+		::anno::in_group("Appearance"),
+		::anno::hard_range( 0 , 1)
+	]],
+	uniform float reflection_roughness = 1.0
+	[[
+		::anno::display_name("Roughness"),
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::in_group("Appearance")
+	]],
+	uniform float bump_strength = 1.0
+	[[
+		::anno::display_name("Bump Strength"),
+		::anno::description("Specifies the strength of the bump."),
+		::anno::in_group("Appearance")
+	]],
+	/*     Transform                                         */
+	uniform float2 texture_translate =  float2 ( 0.f)
+	[[
+		::anno::display_name("Translate"),
+		::anno::description("Controls the position of the texture."),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate =  0.f
+	[[
+		::anno::display_name("Rotate"),
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::in_group("Transform")
+	]],
+	uniform float2 texture_scale =  float2 ( 1.f)
+	[[
+		::anno::display_name("Scale"),
+		::anno::description("Larger numbers increase the size."),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f))
+	]],
+/*     Advanced                                         */
+	uniform float displacement_scale = 0.1f
+	[[
+		::anno::display_name("Displacement Scale"),
+		::anno::description("Determine the amount of displacement. A displacement value of 0 turns off displacement."),
+		::anno::in_group("Advanced")
+	]],
+	uniform int uv_space_index =  0
+	[[
+		::anno::display_name("UV Space Index"),
+		::anno::description("UV space index."),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0, 3)
+	]]
+	)
+	[[
+		::anno::display_name("Leaves - Blue"),
+		::anno::description("A ground material covered with leaves."),
+		::anno::author("NVIDIA vMaterials"),
+		::anno::thumbnail("./.thumbs/Ground_Leaves.ground_leaves_blue.png"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("aec", "ground", "leaves", "nature", "multicolor", "soil", "foliage", "organic", "natural", "forest", "blue", "brown"))
+	]]=
+	::nvidia::core_definitions::add_displacement(
+		base:  ::nvidia::core_definitions::flex_material_v2(
+			base_color:  ::nvidia::core_definitions::blend_colors(
+				color_1:  ::nvidia::core_definitions::blend_colors(
+					color_1: ::nvidia::core_definitions::file_texture(
+							texture: texture_2d("./textures/leaves_diff.jpg" , ::tex::gamma_srgb),
+							mono_source:  ::base::mono_average,
+							brightness:  1.f,
+							contrast:  1.f,
+							scaling:  1.f / texture_scale,
+							translation:  texture_translate,
+							rotation:  texture_rotate,
+							clip:  false,
+							texture_space:  uv_space_index,
+							invert:  false).tint,
+					color_2: ::nvidia::core_definitions::blend_colors(
+						color_1:  ::nvidia::core_definitions::file_texture(
+							texture: texture_2d ( "./textures/leaves_grayscale_diff.png" , ::tex::gamma_srgb),
+							mono_source:  ::base::mono_average,
+							brightness:  1.f,
+							contrast:  1.f,
+							scaling:  1.f / texture_scale ,
+							translation:  texture_translate,
+							rotation:  texture_rotate,
+							clip:  false,
+							texture_space: uv_space_index,
+							invert:  false).tint,
+						color_2:  hue_shift,
+						mode: ::base::color_layer_overlay,
+						weight: 1.0f).tint,
+					mode:  ::base::color_layer_overlay,
+					weight:  ::nvidia::core_definitions::file_texture(
+						texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+						mono_source:  ::base::mono_average,
+						brightness:  blend_undercoat * 2.0f,
+						contrast:  1.f,
+						scaling:  1.f / texture_scale,
+						translation:  texture_translate,
+						rotation:  texture_rotate,
+						clip:  false,
+						texture_space:  uv_space_index,
+						invert:  false).mono).tint,
+			color_2:  ::nvidia::core_definitions::file_texture(
+					texture:  texture_2d("./textures/leaves_ao.png" , ::tex::gamma_srgb),
+					mono_source:  ::base::mono_average,
+					brightness:  1.f,
+					contrast:  1.f,
+					scaling:  1.f / texture_scale,
+					translation:  texture_translate,
+					rotation:  texture_rotate,
+					clip:  false,
+					texture_space:  uv_space_index,
+					invert:  false).tint,
+			mode:  ::base::color_layer_multiply,
+			weight:  1.0f).tint,
+		diffuse_roughness:  0.0f,
+		is_metal:  false, 
+		reflectivity:  ::nvidia::core_definitions::file_texture(
+			texture:  texture_2d("./textures/leaves_ref.png" , ::tex::gamma_srgb),
+			mono_source:  ::base::mono_average,
+			brightness:  1.f,
+			contrast:  1.f,
+			scaling:  1.f / texture_scale,
+			translation:  texture_translate,
+			rotation:  texture_rotate,
+			clip:  false,
+			texture_space:  uv_space_index,
+			invert:  false).mono,
+		reflection_roughness:  ::nvidia::core_definitions::file_texture(
+			texture: texture_2d("./textures/leaves_rou.png" , ::tex::gamma_srgb),
+			mono_source:  ::base::mono_average,
+			brightness:  reflection_roughness,
+			contrast:  1.f,
+			scaling:  1.f / texture_scale,
+			translation:  texture_translate,
+			rotation:  texture_rotate,
+			clip:  false,
+			texture_space:  uv_space_index,
+			invert:  false).mono,
+		anisotropy:  0.0f,
+		anisotropy_rotation:  0.0f,
+		transparency:  0.0f,
+		transmission_color:  color(1.0f, 1.0f, 1.0f),
+		volume_color:  color(1.0f, 1.0f, 1.0f),
+		transmission_roughness:  0.0f,
+		base_thickness:  0.1f,
+		ior:  1.5f,
+		thin_walled:  false,
+		normal:  ::nvidia::core_definitions::normalmap_texture(
+			texture:  texture_2d("./textures/leaves_norm.png" , ::tex::gamma_linear),
+			factor:  bump_strength,
+			scaling:  1.f / texture_scale,
+			translation:  texture_translate,
+			rotation:  texture_rotate,
+			clip:  false,
+			texture_space:  uv_space_index)),
+	displacement:  ::nvidia::core_definitions::file_texture(
+		texture:  texture_2d("./textures/leaves_dis.png" , ::tex::gamma_srgb),
+		mono_source:  ::base::mono_average,
+		brightness:  1.0f,
+		contrast:  1.0f,
+		scaling:  1.f / texture_scale,
+		translation:  texture_translate,
+		rotation:  texture_rotate,
+		clip:  false,
+		texture_space:  uv_space_index,
+		invert:  false).mono,
+	displacement_scale: displacement_scale);

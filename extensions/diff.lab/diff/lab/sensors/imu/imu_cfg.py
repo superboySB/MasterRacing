@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import RED_ARROW_X_MARKER_CFG
 from isaaclab.utils import configclass
@@ -13,6 +15,16 @@ from isaaclab.sensors import SensorBaseCfg
 # from isaaclab.sensors import Imu
 from .imu import HifiImu
 from .imu_noise import ImuNoiseCfg
+
+
+REPO_ROOT_DIR = Path(__file__).resolve().parents[6]
+LOCAL_UI_DIR = REPO_ROOT_DIR / "assets/Props/UIElements"
+LOCAL_ARROW_USD = (LOCAL_UI_DIR / "arrow_x.usd").resolve()
+if not LOCAL_ARROW_USD.exists():
+    raise FileNotFoundError(f"Missing required asset: {LOCAL_ARROW_USD}")
+
+LOCAL_RED_ARROW_X_MARKER_CFG = RED_ARROW_X_MARKER_CFG.copy()
+LOCAL_RED_ARROW_X_MARKER_CFG.markers["arrow"].usd_path = str(LOCAL_ARROW_USD)
 
 
 @configclass
@@ -34,7 +46,7 @@ class HifiImuCfg(SensorBaseCfg):
     offset: OffsetCfg = OffsetCfg()
     """The offset pose of the sensor's frame from the sensor's parent frame. Defaults to identity."""
 
-    visualizer_cfg: VisualizationMarkersCfg = RED_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_goal")
+    visualizer_cfg: VisualizationMarkersCfg = LOCAL_RED_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/velocity_goal")
     """The configuration object for the visualization markers. Defaults to RED_ARROW_X_MARKER_CFG.
 
     This attribute is only used when debug visualization is enabled.

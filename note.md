@@ -19,9 +19,13 @@ ISAACLAB_PATH=/workspace/isaaclab ${ISAACLAB_PATH}/isaaclab.sh -p .vscode/tools/
 - 赛道由 `RacingComplexTerrainCfg` 生成 zigzag/circular/ellipse，每段 8 门，课程按过门数调地形等级与指令噪声。
 
 ## 模型与观测简表
-- 策略：VisionActorCritic（`standalone/rsl_rl/ext/modules/vision_actor_critic.py`），深度图 96×72 经 3 层卷积+BN 后与状态映射相加成 192 维，再接 actor/critic MLP（128/128，`rsl_rl_ppo_cfg.py`），LeakyReLU，动作噪声可学习。
+- 策略：VisionActorCritic（`standalone/rsl_rl/ext/modules/vision_actor_critic.py`），无 RNN。
+  - 观测：深度图 96×72=6912 + 状态 16 维 = 6928 维；Stage0/1/2 策略观测相同（Critic 去掉噪声）。
+  - 图像分支：Conv2d 1→16, 3×3, stride 3 → Conv2d 16→32, 3×3, stride 3 → Conv2d 32→64, 2×2, stride 2，三层各接 BN + LeakyReLU；输出 4×5×64=1280，线性到 192。
+  - 状态分支：16 维线性到 192。
+  - 特征融合：两支相加后 LeakyReLU 得 192 维；Actor/Critic MLP 128→128（`rsl_rl_ppo_cfg.py`），输出均值；动作噪声可学习（scalar 或 log 标准差），可选辅助头把 192 维映射到 1。
 - 动作 4 维（推力+wx/wy/wz），先 tanh，再在 `DiffActions.process_actions` 中按 `action_scale`/`action_offset` 缩放；推力额外乘质量误差噪声，延迟 0.03s。
-- 观测 Stage0/1/2：Policy 6928 维（含噪声），Critic 6928 维（无噪声），Auxiliary 1 维 `cross_obs`。
+- 奖励/终止：Stage0/1/2 切换碰撞、噪声和奖励系数（见下文各阶段设置）；Auxiliary 额外 1 维 `cross_obs`。
 
 ## 各阶段设置
 - **Stage0 软碰撞（TRAINING_STAGE=0）**：禁用碰撞，指令无噪声，episode 6s，仅 z 越界终止。奖励：进度余弦，指令角速度罚 -0.02，动作平滑罚 -0.01，软碰撞罚 -50，感知对齐 0.1，过门 10。
@@ -30,38 +34,46 @@ ISAACLAB_PATH=/workspace/isaaclab ${ISAACLAB_PATH}/isaaclab.sh -p .vscode/tools/
 - **Stage2 评测/导出（TRAINING_STAGE=2）**：与 Stage1 相同碰撞，噪声更大，episode 8s，无姿态惩罚；用于测试与导出。
 
 ## 训练与评测命令（按顺序执行）
-注意stage 0的1024个env就需要近13G显存
+注意stage 0的1024个env就需要近13G显存, 3072个env就需要近xxG显存
+
+资产已经放在仓库的 `assets/` 里（UIElements、PolyHaven 天空贴图、vMaterials_2/Ground/Asphalt_Fine.mdl），运行下面的命令无需再设置 `ISAAC_ASSET_ROOT` 或联网
+```sh
+export OMNI_DATASTORE_ENABLED=0 && \
+export OMNI_KIT_DISABLE_TELEMETRY=1 && \
+export OMNI_KIT_DISABLE_CRASH_REPORTING=1 && \
+export CARB_DISABLE_PYTHON_USDPREVIEW=1
+```
 
 ### Stage0 软碰撞
 ```bash
-TRAINING_STAGE=0 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
+CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=0 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
   --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless \
-  --num_envs 2048 --experiment_name racing_stage0 --run_name s0
+  --num_envs 3072 --experiment_name racing_stage0 --run_name s0
 ```
 ### Stage1 硬碰撞（可从 Stage0 恢复）
 ```bash
-TRAINING_STAGE=1 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
-  --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless --num_envs 2048 \
+CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=1 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
+  --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless --num_envs 3072 \
   --experiment_name racing_stage1 --run_name s1 \
   --resume True --load_run <stage0_run_dir> --checkpoint <ckpt.pt>
 ```
 ### Stage2 环境下采集离线数据（用 Stage1 ckpt）
 ```sh
-TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.offline.data_collector \
+CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.offline.data_collector \
   --task DiffLab-Quadcopter-CTBR-Racing-v0 --num_envs 8 --video_length 400 \
   --experiment_name racing_stage1 --load_run <run_dir> --checkpoint <ckpt.pt> \
   --dataset racing_stage1.h5
 ```
 ### 离线微调辅助头
 ```sh
-${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.offline.train \
+CUDA_VISIBLE_DEVICES=7 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.offline.train \
   --h5_path /data/racing_data/racing_stage1.h5 \
   --policy_path logs/rsl_rl/racing_stage1/<run_dir>/checkpoints/<ckpt.pt> \
   --save_path logs/offline_finetune --epochs 5 --batch_size 256 --lr 3e-4
 ```
 ### Stage2 评测/导出（可展示深度或导出 ONNX）
 ```sh
-TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.play \
+CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.play \
   --task DiffLab-Quadcopter-CTBR-Racing-v0 --num_envs 1 --show_camera \
   --experiment_name racing_stage1 --load_run <run_dir> --checkpoint <ckpt.pt> \
   --video --video_length 400

@@ -1,12 +1,25 @@
 import math
 from dataclasses import MISSING
 
+from pathlib import Path
+
 from isaaclab.managers import CommandTermCfg
 from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG, CUBOID_MARKER_CFG
+from isaaclab.markers.config import FRAME_MARKER_CFG, CUBOID_MARKER_CFG
 from isaaclab.utils import configclass
 
 from .commands import UniformWorldPoseCommand, RacingCommand
+
+REPO_ROOT_DIR = Path(__file__).resolve().parents[7]
+LOCAL_UI_DIR = REPO_ROOT_DIR / "assets/Props/UIElements"
+LOCAL_FRAME_USD = (LOCAL_UI_DIR / "frame_prim.usd").resolve()
+for required_asset in (LOCAL_FRAME_USD,):
+    if not required_asset.exists():
+        raise FileNotFoundError(f"Missing required asset: {required_asset}")
+
+# Use local UI assets instead of Nucleus to avoid network fetches.
+LOCAL_FRAME_MARKER_CFG = FRAME_MARKER_CFG.copy()
+LOCAL_FRAME_MARKER_CFG.markers["frame"].usd_path = str(LOCAL_FRAME_USD)
 
 @configclass
 class WorldPoseCommandCfg(CommandTermCfg):
@@ -40,7 +53,7 @@ class WorldPoseCommandCfg(CommandTermCfg):
     goal_pose_visualizer_cfg: VisualizationMarkersCfg = CUBOID_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
     """The configuration for the goal pose visualization marker. Defaults to FRAME_MARKER_CFG."""
 
-    current_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+    current_pose_visualizer_cfg: VisualizationMarkersCfg = LOCAL_FRAME_MARKER_CFG.replace(
         prim_path="/Visuals/Command/body_pose"
     )
     """The configuration for the current pose visualization marker. Defaults to FRAME_MARKER_CFG."""
@@ -83,13 +96,13 @@ class RacingCommandCfg(CommandTermCfg):
     update_threshold: float = 0.1       # [m]
     """minimum distance threshold to decide whether update to next gate"""
 
-    goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
+    goal_pose_visualizer_cfg: VisualizationMarkersCfg = LOCAL_FRAME_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose")
     """The configuration for the goal pose visualization marker. Defaults to FRAME_MARKER_CFG."""
 
     goal_pose_gt_visualizer_cfg: VisualizationMarkersCfg = CUBOID_MARKER_CFG.replace(prim_path="/Visuals/Command/goal_pose_gt")
     """The configuration for the goal pose ground truth visualization marker. Defaults to CUBOID_MARKER_CFG."""
 
-    current_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
+    current_pose_visualizer_cfg: VisualizationMarkersCfg = LOCAL_FRAME_MARKER_CFG.replace(
         prim_path="/Visuals/Command/body_pose"
     )
     """The configuration for the current pose visualization marker. Defaults to FRAME_MARKER_CFG."""

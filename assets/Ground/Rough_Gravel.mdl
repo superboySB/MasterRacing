@@ -1,0 +1,139 @@
+/******************************************************************************
+ *     Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::state::*;
+import ::tex::*;
+import ::math::*;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+		return ::math::lerp(low, high, input);
+}
+
+export material Rough_Gravel(
+    float diffuse_brightness = 1.f [[
+        ::anno::display_name("Diffuse Brightness"),
+		::anno::description("Adjust the overall brightness of the texture."),
+		::anno::hard_range(0.f, 1.f),
+        ::anno::usage("")
+    ]],
+    uniform float bump_factor = 1.f [[
+        ::anno::description("Determines the degree of bumpiness."),
+        ::anno::display_name("Bump Factor")
+    ]],
+	
+	// Adjustments Group
+	uniform float2 texture_translate =  float2(0.0f)
+	[[
+		::anno::display_name("Translate"),
+		::anno::description("Controls the position of the texture."),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate =  0.f
+	[[
+		::anno::display_name("Rotate"),
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::in_group("Transform")
+	]],
+	uniform float2 texture_scale =  float2(2.0f)
+	[[
+		::anno::display_name("Scale"),
+		::anno::description("Larger numbers increase the size."),
+		::nvidia::core_definitions::dimension(float2(1.2f, 1.2f)),
+		::anno::in_group("Transform")
+	]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Rough Gravel"),
+	::anno::description("A floor material of rough an uneven gravel and dust."),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Rough_Gravel.Rough_Gravel.png"),
+	::anno::key_words(string[]("gravel", "pebbles", "ground", "outdoor", "construction", "gray"))
+]]
+ = 
+    let {
+		
+		uniform texture_2d DIFFTEX = texture_2d("./textures/rough_gravel_diff.jpg", ::tex::gamma_srgb);
+		uniform texture_2d NORMTEX = texture_2d("./textures/rough_gravel_norm.jpg", ::tex::gamma_linear);
+		uniform texture_2d ROUGHTEX = texture_2d("./textures/rough_gravel_rough.jpg", ::tex::gamma_linear);
+		
+		::base::texture_coordinate_info UVW = ::base::transform_coordinate(::base::rotation_translation_scale(float3(0.0, 0.0, texture_rotate/180.*::math::PI ), float3(texture_translate.x, texture_translate.y, 0.f), float3(texture_scale.x, texture_scale.y, 1.0)), ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)));
+		
+		float hist_position = 0.9f;
+		
+		float tt = histogram_range(::base::file_texture(ROUGHTEX, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, UVW, float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 1.f, hist_position);
+		
+		
+        material_surface tmp1(
+            ::df::custom_curve_layer(0.04f, 1.f, 3.31f, 0.3f, ::df::microfacet_ggx_smith_bsdf(tt * tt, tt * tt, color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::df::diffuse_reflection_bsdf(::base::file_texture(DIFFTEX, color(0.f, 0.f, 0.f), color(diffuse_brightness), ::base::mono_alpha, UVW, float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, 0.600000024f, ""), ::state::normal()),
+            material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(
+            float3(0.f),
+            1.f,
+            ::base::tangent_space_normal_texture(NORMTEX, bump_factor, false, true, UVW, float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f));
+    } in
+        material(
+            thin_walled: false,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3, 
+            volume: tmp4,
+            geometry: tmp5);

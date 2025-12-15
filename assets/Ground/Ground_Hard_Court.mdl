@@ -1,0 +1,570 @@
+/******************************************************************************
+ *     Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+const string DESCRIPTION = "A hard court material for sports activities";
+
+// Taken from https://www.shadertoy.com/view/4tlBWB
+float3 hsv2rgb(float3 c)
+{
+	float4 K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    float3 p = ::math::abs(::math::frac(float3(c.x) + float3(K.x, K.y, K.z)) * 6.0 - float3(K.w));
+    return c.z * ::math::lerp(float3(K.x), ::math::clamp(p - float3(K.x), 0.0, 1.0), c.y);
+}
+
+
+float3 srgb2rgb(float3 val)
+{
+	return ::math::pow(::math::max(val, float3(0.0f)), 2.2);
+}
+
+
+float uint2float(int x)
+{
+    return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+    x ^= x >>> 16;
+    x *= 0x7feb352d;
+    x ^= x >>> 15;
+    x *= 0x846ca68b;
+    x ^= x >>> 16;
+    return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+    return ret_val;
+}    
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation     = 0.0,
+								uniform float2 scaling     = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space       = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.             ,  0. ,     0.,
+			 0.            , 1.0 /scaling.y ,  0. ,     0.,
+			 0.            , 0.             ,  1.0,     0.,
+			 translation.x , translation.y  ,  0.0,     1.);
+
+    float s = ::math::sin(rotation_rad);
+    float c = ::math::cos(rotation_rad);
+    float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) * texture_scale;
+	float Z =  patch_size;     // patch scale inside example texture
+	float CON = 1.0f;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I))) - m*float(CON))
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1)))) - m*float(CON))
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0)))) - m*float(CON));
+	else
+		O = (W[0] =      -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1))))   - m*float(CON))
+	      + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0)))) - m*float(CON))
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1)))) - m*float(CON));
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - 0.5) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + ::state::normal());
+}
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					::math::lerp(-width, 1.0, position),
+					::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+color endless_texture(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 10.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0,
+	bool gamma_correct_lookup = true
+)
+{
+	return gamma_correct_lookup ? color(srgb2rgb(
+			nonrepeat_lookup (
+				texture: texture,
+				uvw: uvw,
+				texture_scale: texture_scale,
+				average_color: average_color,
+				patch_size: patch_size
+			))
+		) : color(nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		));
+}
+
+float3 endless_normal(
+	uniform texture_2d texture = texture_2d(),
+	float factor = 1.0,
+	bool flip_tangent_u = false,
+	bool flip_tangent_v = false,
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0
+)
+{
+	float3 transformed_tangent_u = flip_tangent_u ? uvw.tangent_u : - uvw.tangent_u;
+    float3 transformed_tangent_v = flip_tangent_v ? uvw.tangent_v : - uvw.tangent_v;
+	
+	if (flip_tangent_u)
+		transformed_tangent_u=-transformed_tangent_u;
+	if (flip_tangent_v)
+		transformed_tangent_v=-transformed_tangent_v;
+
+	// normalized Lookup
+	float3 tangent_space_normal =
+         (nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		) - 0.5) * (2.0 * factor);
+		
+	 return ::math::normalize(uvw.tangent_u * tangent_space_normal.x +
+          uvw.tangent_v * tangent_space_normal.y +
+          ::state::normal()*1.0); 
+}
+
+export material Ground_Hard_Court(
+    uniform bool infinite_tiling = true [[
+        ::anno::description("Enables infinite tiling feature which removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+        ::anno::display_name("Infinite Tiling"),
+        ::anno::in_group("Appearance")
+    ]],
+    float ground_hue = 0.02f [[
+        ::anno::description("Selects the Hue for the Ground cort material. You can select any hue that you want, though we recommend to stick to colors that are actually used in real life."),
+        ::anno::display_name("Ground  Hue"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float ground_saturation = 0.85f [[
+        ::anno::description("Adjust the saturation of the hard court material color. Default is 0.8, Beware that setting the saturation to the maximum value will result in unrealistic looking saturation."),
+        ::anno::display_name("Ground  Saturation"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float ground_brightness = 0.6f [[
+        ::anno::description("Adjusts the overall brightness of the hard court material. Default is 0.6."),
+        ::anno::display_name("Ground Brightness"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float roughness = 1.f [[
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::display_name("Roughness"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float roughness_variation = 0.f [[
+        ::anno::description("Breaks up the roughness pattern and makes it less uniform."),
+        ::anno::display_name("Roughness Variation"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float reflectivity = 1.f [[
+        ::anno::description("The overall reflectivity of the surface."),
+        ::anno::display_name("Reflectivity"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float bump_strength = 1.f [[
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::display_name("Bump Strength"),
+        ::anno::in_group("Appearance"),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::hard_range(0.f, 3.f)
+    ]],
+    uniform float2 texture_translate = float2(0.f) [[
+        ::anno::description("Controls the position of the texture."),
+        ::anno::display_name("Translate"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float texture_rotate = 0.f [[
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::display_name("Rotate"),
+        ::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f)
+    ]],
+    uniform float2 texture_scale = float2(1.f) [[
+        ::anno::description("Larger numbers increase the size."),
+        ::anno::display_name("Scale"),
+		::nvidia::core_definitions::dimension(float2(1.0, 1.0)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool enable_round_corners = false [[
+        ::anno::description("Enabling creates the impression of rounded corners across hard edges. Comes at a slight performance cost as additional raytracing calls are required to evaluate the effect."),
+        ::anno::display_name("Enable Round Corners"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorners_radius = 1.5f [[
+        ::anno::description("Radius of the rounded corners in millimeters."),
+        ::anno::display_name("Round Corner Radius (mm)"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 1.f)
+    ]],
+    uniform bool roundcorners_across_materials = false [[
+        ::anno::description("When enabled, the effect is across different materials, otherwise just the same material."),
+        ::anno::display_name("Across Materials"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::description("Use selected UV space for material."),
+        ::anno::display_name("UV Space Index"),
+        ::anno::in_group("Advanced")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Red"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "red", "saturated", "warm"))
+]]
+ = 
+    let {
+        bool tmp0 = false;
+        material_surface tmp1(
+            ::df::weighted_layer(1.f, ::df::custom_curve_layer(0.0350400023f, 1.f, 5.f, histogram_scan_big(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 0.722000062f, ::math::lerp(0.674000025f, 0.238000005f, reflectivity)), ::df::microfacet_ggx_smith_bsdf((histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.349999994f, 0.600000024f, roughness)) + roughness_variation * 0.197000012f * (float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] - 0.108000003f)) * (histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.349999994f, 0.600000024f, roughness)) + roughness_variation * 0.197000012f * (float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] - 0.108000003f)), (histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.349999994f, 0.600000024f, roughness)) + roughness_variation * 0.197000012f * (float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] - 0.108000003f)) * (histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.349999994f, 0.600000024f, roughness)) + roughness_variation * 0.197000012f * (float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] - 0.108000003f)), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::diffuse_reflection_bsdf(::nvidia::core_definitions::blend_colors(::nvidia::core_definitions::blend_colors(color(::math::pow(hsv2rgb(::math::lerp(float3(0.f, 0.f, 0.5f), float3(1.f, 0.800000012f, 0.899999976f), float3(ground_hue, ground_saturation, ground_brightness))), 2.20000005f)), infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_mono_diff.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.63499999f), 1.99800014f, true) : color(::math::pow(::base::file_texture(texture_2d("./textures/hard_court_mono_diff.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 2.20000005f)), ::base::color_layer_multiply, 1.f).tint, color(::math::pow(float3(infinite_tiling ? endless_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.866999984f, 0.764999986f, 0.497999996f), 1.99800014f, true) : ::base::file_texture(texture_2d("./textures/hard_court_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 2.20000005f)), ::base::color_layer_multiply, 0.f).tint, 0.f), infinite_tiling ? endless_normal(texture_2d("./textures/hard_court_norm.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.497999996f, 0.50999999f, 0.92900002f), 1.99800014f) : normalmap_normal(texture_2d("./textures/hard_court_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index))), bsdf(), infinite_tiling ? endless_normal(texture_2d("./textures/hard_court_norm.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 1.99800014f, float3(0.497999996f, 0.50999999f, 0.92900002f), 1.99800014f) : normalmap_normal(texture_2d("./textures/hard_court_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index))),
+            material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(
+            float3(0.f),
+            1.f,
+            enable_round_corners ? ::state::rounded_corner_normal(roundcorners_radius / 1000.f, roundcorners_across_materials, 1.f) : ::state::normal());
+        hair_bsdf tmp6 = hair_bsdf();
+    } in
+        material(
+            thin_walled: tmp0,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3,
+            volume: tmp4,
+            geometry: tmp5,
+            hair: tmp6);
+			
+// 2
+export material Ground_Hard_Court_Red_Desaturated(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Red Desaturated"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Red_Desaturated.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "red", "warm"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.02f,
+	ground_saturation:	0.65f,
+	ground_brightness:	0.6f,
+	roughness:			1.0f,
+	roughness_variation:1.0f,
+	reflectivity:		1.0f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+//3
+export material Ground_Hard_Court_Blue(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Blue"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Blue.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "blue", "cool", "saturated"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.589f,
+	ground_saturation:	0.9f,
+	ground_brightness:	0.5f,
+	roughness:			0.41f,
+	roughness_variation:1.0f,
+	reflectivity:		0.5f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+
+//4
+export material Ground_Hard_Court_Faded_Blue(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Faded Blue"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Faded_Blue.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "blue", "cool", "desaturated"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.58f,
+	ground_saturation:	0.65f,
+	ground_brightness:	0.65f,
+	roughness:			1.0f,
+	roughness_variation:1.0f,
+	reflectivity:		1.0f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+
+
+//5
+export material Ground_Hard_Court_Light_Green(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Light Green"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Light_Green.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "green", "light"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.3f,
+	ground_saturation:	0.68f,
+	ground_brightness:	0.623f,
+	roughness:			0.41f,
+	roughness_variation:0.0f,
+	reflectivity:		0.5f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+
+// 6
+export material Ground_Hard_Court_Dark_Green(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Dark Green"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Dark_Green.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "green", "dark"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.3f,
+	ground_saturation:	0.8f,
+	ground_brightness:	0.0f,
+	roughness:			0.41f,
+	roughness_variation:0.0f,
+	reflectivity:		0.5f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+
+
+// 7
+export material Ground_Hard_Court_Olive_Green(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Ground Hard Court - Olive Green"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ground_Hard_Court.Ground_Hard_Court_Olive_Green.png"),
+	::anno::key_words(string[]("ground", "hard court", "court", "hard", "exterior", "sports", "bumped", "rough", "artificial", "green", "olive"))
+]] = Ground_Hard_Court
+(
+	infinite_tiling:	true,
+	ground_hue:			0.22f,
+	ground_saturation:	0.495f,
+	ground_brightness:	0.25f,
+	roughness:			0.5f,
+	roughness_variation:0.0f,
+	reflectivity:		0.5f,
+	bump_strength:		1.0f,
+	texture_translate:	float2(0.0f),
+	texture_rotate:		0.0f,
+	texture_scale:		float2(1.0f),
+	enable_round_corners: 			false,
+	roundcorners_radius:			1.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:		0	
+);
+
+
+
+
+

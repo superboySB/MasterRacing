@@ -14,12 +14,14 @@
 # *******************************************************************************
 
 from __future__ import annotations
+import os
+from pathlib import Path
+
 from isaaclab.utils import configclass
 from isaaclab.scene import InteractiveSceneCfg
 from diff.lab.terrains import TerrainImporterCfg as diff_TerrainImporterCfg
 from diff.lab_tasks.tasks.racing.terrains import *
 import isaaclab.sim as sim_utils
-from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR, ISAAC_NUCLEUS_DIR
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from diff.lab_assets.quadcopter import DRONE_CFG, DRONE_NO_COLLIDER_CFG
 from isaaclab.sensors import ContactSensorCfg, RayCasterCameraCfg, patterns, TiledCameraCfg
@@ -35,8 +37,15 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from diff.lab.managers import LossTermCfg as LossTerm
 from diff.lab.controllers.controller_diff_cfg import CTBRControllerCfg
 
-import os
 STAGE = int(os.environ.get("TRAINING_STAGE", 0)) # 0: pre-training, 1: training, 2: testing
+
+REPO_ROOT_DIR = Path(__file__).resolve().parents[6]
+LOCAL_ASSETS_DIR = REPO_ROOT_DIR / "assets"
+LOCAL_GROUND_MDL = (LOCAL_ASSETS_DIR / "Ground/Asphalt_Fine.mdl").resolve()
+LOCAL_SKY_HDR = (LOCAL_ASSETS_DIR / "Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr").resolve()
+for required_asset in (LOCAL_GROUND_MDL, LOCAL_SKY_HDR):
+    if not required_asset.exists():
+        raise FileNotFoundError(f"Missing required asset: {required_asset}")
 
 @configclass
 class SceneCfg(InteractiveSceneCfg):
@@ -53,13 +62,14 @@ class SceneCfg(InteractiveSceneCfg):
             dynamic_friction=1.0,
         ),
         visual_material=sim_utils.MdlFileCfg(
-            mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
+            mdl_path=str(LOCAL_GROUND_MDL),
             project_uvw=True,
             texture_scale=(0.25, 0.25),
         ),
         debug_vis=False,
         )
     if STAGE == 0:
+        # Stage0 (soft collision): use mesh without collider so contacts won't end episodes
         robot: ArticulationCfg = DRONE_NO_COLLIDER_CFG.replace(prim_path="/World/envs/env_.*/Robot")    # type: ignore
     else:
         contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/body", history_length=3, track_air_time=True, debug_vis=False)
@@ -69,7 +79,7 @@ class SceneCfg(InteractiveSceneCfg):
             prim_path="/World/skyLight",
             spawn=sim_utils.DomeLightCfg(
                 intensity=750.0,
-                texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+                texture_file=str(LOCAL_SKY_HDR),
             ),
         )
 
@@ -248,6 +258,7 @@ class EventCfg:
 class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     if STAGE == 0:
+        # Soft collision: only remove when z out of bound, no contact termination
         outofbound = DoneTerm(func=mdp.out_of_bound,params={"bounds":(0.00, 10.0)})
     else:
         base_contact = DoneTerm(
@@ -298,6 +309,7 @@ class RewardsCfg:
         params={"action_name": "force_torque"})
    
     if STAGE == 0:
+        # Soft collision penalty: ray-based proximity to obstacles, no physics contact required
         collision_penalty = RewTerm(
             func=mdp.collision_penalty_custom, 
             weight=-50.0,

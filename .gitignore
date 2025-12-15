@@ -1,6 +1,6 @@
 # Omniverse
 **/*.dmp
-**/.thumbs
+# **/.thumbs
 datasets/rosbag/*
 # Python
 .DS_Store
@@ -30,7 +30,7 @@ datasets/rosbag/*
 **/.neptune/*
 docker/artifacts/
 *.tmp
-*.png
+# *.png
 *.pdf
 # Isaac-Sim packman
 _isaac_sim*

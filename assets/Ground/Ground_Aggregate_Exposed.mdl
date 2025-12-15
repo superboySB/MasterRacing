@@ -1,0 +1,467 @@
+/******************************************************************************
+ *     Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+import ::anno::*;
+import ::base::*;
+import ::math::*;
+import ::state::*;
+import ::std::*;
+import ::tex::*;
+import ::df::*;
+import ::nvidia::core_definitions::*;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "An aggregate stone material with an additional moss layer growing on top.";
+
+
+float3 hsv2rgb(float3 c)
+{
+	float4 K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    float3 p = ::math::abs(::math::frac(float3(c.x) + float3(K.x, K.y, K.z)) * 6.0 - float3(K.w));
+    return c.z * ::math::lerp(float3(K.x), ::math::clamp(p - float3(K.x), 0.0, 1.0), c.y);
+}
+
+
+color hue_shift(
+	color input = color(1.0, 0.0, 0.0), 
+	float hue_adjust = 0.0f
+)
+{
+	float3 in_color = float3(input);
+	float3  kRGBToYPrime = float3 (0.299, 0.587, 0.114);
+    float3  kRGBToI      = float3 (0.596, -0.275, -0.321);
+    float3  kRGBToQ      = float3 (0.212, -0.523, 0.311);
+
+	
+    float3  kYIQToR     = float3 (1.0, 0.956, 0.621);
+    float3  kYIQToG     = float3 (1.0, -0.272, -0.647);
+    float3  kYIQToB     = float3 (1.0, -1.107, 1.704);
+
+    float   YPrime  = ::math::dot(in_color, kRGBToYPrime);
+    float   I       = ::math::dot(in_color, kRGBToI);
+    float   Q       = ::math::dot(in_color, kRGBToQ);
+    float   hue     = ::math::atan2(Q, I);
+    float   chroma  = ::math::sqrt(I * I + Q * Q);
+
+    hue += hue_adjust;
+
+    Q = chroma * ::math::sin(hue);
+    I = chroma * ::math::cos(hue);
+
+    float3    yIQ   = float3 (YPrime, I, Q);
+
+    return color(::math::dot (yIQ, kYIQToR),::math::dot (yIQ, kYIQToG), ::math::dot (yIQ, kYIQToB) );
+}
+
+
+float remap(float input, float low_1, float high_1, float low_2, float high_2)
+{
+	return low_2 + ((input - low_1) * (high_2 - low_2))/(high_1 - low_1);
+}
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_scan_small(float input, float width, float position)
+{	
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					::math::lerp(0.0, 1.0 - width, position),
+					::math::lerp(width, 1.0 , position)),
+				0.0,
+				1.0);
+}
+
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					::math::lerp(-width, 1.0, position),
+					::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+    ::anno::hidden() 
+]]
+{
+    return
+        n.x* float3(::state::texture_tangent_u(0).x,::state::texture_tangent_v(0).x,::state::normal().x)+
+        n.y* float3(::state::texture_tangent_u(0).y,::state::texture_tangent_v(0).y,::state::normal().y)+
+        n.z* float3(::state::texture_tangent_u(0).z,::state::texture_tangent_v(0).z,::state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+    ::anno::hidden() 
+]]
+{
+    return  ::state::texture_tangent_u(0) * n.x +
+            ::state::texture_tangent_v(0) * n.y +
+            ::state::normal() * n.z ;
+}
+
+
+
+float3 add_detail_normal(float3 nd = ::state::normal(), float3 n = ::state::normal())
+{
+    // http://blog.selfshadow.com/publications/blending-in-detail/
+    float3 n_t = transform_internal_to_tangent(n);
+    float3 nd_t = transform_internal_to_tangent(nd);
+
+    n_t=n_t + float3(0.,0.,1.);
+    nd_t = nd_t *  float3(-1.,-1.,1.);
+
+    n = n_t*::math::dot(n_t, nd_t)/n_t.z - nd_t;
+    return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - 0.5) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + ::state::normal());
+}
+
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation     = 0.0,
+								uniform float2 scaling     = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space       = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.             ,  0. ,     0.,
+			 0.            , 1.0 /scaling.y ,  0. ,     0.,
+			 0.            , 0.             ,  1.0,     0.,
+			 translation.x , translation.y  ,  0.0,     1.);
+
+    float s = ::math::sin(rotation_rad);
+    float c = ::math::cos(rotation_rad);
+    float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+export material Ground_Aggregate_Exposed(
+    float stone_brightness = 1.f [[
+        ::anno::description("Adjusts the lightness of the stones and pebbles."),
+        ::anno::display_name("Stone Brightness"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Stone")
+    ]],
+    float pebble_tip_roughness = 0.f [[
+        ::anno::description("Controls the roughness of the pebble tips."),
+        ::anno::display_name("Pebble Tip Roughness"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Stone")
+    ]],
+    float stones_bump_factor = 1.0f [[
+        ::anno::description("Drives the bumpiness of the stones."),
+        ::anno::display_name("Stone Bump Factor"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Stone")
+    ]],
+    float moss_height_growth = 0.599000037f [[
+        ::anno::description("Controls the growth of the moss material."),
+        ::anno::display_name("Moss  Growth"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    float evem_moss_distribution_amount = 0.423000008f [[
+        ::anno::description("A lower value makes the moss grow more unevenly across the surface."),
+        ::anno::display_name("Moss Coverage"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    float moss_saturation = 0.0420000032f [[
+        ::anno::description("Controls the saturation of the moss."),
+        ::anno::display_name("Moss Saturation"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    float moss_brightness = 0.78700006f [[
+        ::anno::description("Adjusts the brightness of the moss."),
+        ::anno::display_name("Moss Brightness"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    float moss_moisture = 0.f [[
+        ::anno::description("It describes how damp the moss is."),
+        ::anno::display_name("Moss Moisture"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    float moss_weight = 1.f [[
+        ::anno::description("Decreasing this parameter makes the moss layer more transparent."),
+        ::anno::display_name("Moss Weight"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+	// for some reason this parameter got exported twice form the substance graph, I 
+	// could not yet figure out why
+    // float moss_weight_1 = 1.f [[
+        // ::anno::description("Decreasing this parameter makes the moss layer more transparent."),
+        // ::anno::display_name("Moss Weight"),
+        // ::anno::in_group("Appearance", "Moss")
+    // ]],
+    uniform float moss_bump_factor = 1.f [[
+        ::anno::description("Determines the degree of bumpiness of the moss."),
+        ::anno::display_name("Moss Bump Factor"),
+		::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance", "Moss")
+    ]],
+    uniform float2 texture_translate = float2(0.f) [[
+        ::anno::description("Controls the position of the texture."),
+        ::anno::display_name("Translate"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float texture_rotate = 0.f [[
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::display_name("Rotate"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float2 texture_scale = float2(0.5f) [[
+        ::anno::description("Larger numbers increase the size."),
+        ::anno::display_name("Scale"),
+        ::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(0.4, 0.4))
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::description("Uses the selected UV Space."),
+        ::anno::display_name("UV Space Index"),
+        ::anno::in_group("Advanced")
+    ]]
+)
+[[
+    ::anno::display_name("Ground Aggregate Mossy"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Exposed.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray"))
+]]
+ = 
+    let {
+        bool tmp0 = false;
+		float moss_weight_1 = 1.f;
+		float moss_brightness_remap = moss_brightness * 2.0;
+		
+        material_surface tmp1(::df::custom_curve_layer(0.0299999993f, 1.f, 5.f, 1.f, ::df::microfacet_ggx_smith_bsdf(::math::lerp(::math::lerp(::math::lerp(0.459000021f, 1.f, ::base::file_texture(texture_2d("./textures/aggregate_exposed_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), 0.901000023f - ::math::clamp(remap(::base::file_texture(texture_2d("./textures/ground_aggregate_exposed_curv.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.5f, 1.f, 0.f, 1.f), 0.f, 1.f) * ::math::lerp(1.f, 0.f, pebble_tip_roughness), histogram_scan_small(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.179000005f, 0.553000033f)), histogram_range(float3(::base::file_texture(texture_2d("./textures/moss_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(0.638283014f, 0.638283014f, 0.638283014f), ::base::mono_alpha, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 0.580000043f, ::math::lerp(0.800000012f, 0.180000007f, moss_moisture)), ::math::lerp(0.f, ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f)), moss_weight_1)) * ::math::lerp(::math::lerp(::math::lerp(0.459000021f, 1.f, ::base::file_texture(texture_2d("./textures/aggregate_exposed_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), 0.901000023f - ::math::clamp(remap(::base::file_texture(texture_2d("./textures/ground_aggregate_exposed_curv.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.5f, 1.f, 0.f, 1.f), 0.f, 1.f) * ::math::lerp(1.f, 0.f, pebble_tip_roughness), histogram_scan_small(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.179000005f, 0.553000033f)), histogram_range(float3(::base::file_texture(texture_2d("./textures/moss_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(0.638283014f, 0.638283014f, 0.638283014f), ::base::mono_alpha, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 0.580000043f, ::math::lerp(0.800000012f, 0.180000007f, moss_moisture)), ::math::lerp(0.f, ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f)), moss_weight_1)), ::math::lerp(::math::lerp(::math::lerp(0.459000021f, 1.f, ::base::file_texture(texture_2d("./textures/aggregate_exposed_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), 0.901000023f - ::math::clamp(remap(::base::file_texture(texture_2d("./textures/ground_aggregate_exposed_curv.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.5f, 1.f, 0.f, 1.f), 0.f, 1.f) * ::math::lerp(1.f, 0.f, pebble_tip_roughness), histogram_scan_small(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.179000005f, 0.553000033f)), histogram_range(float3(::base::file_texture(texture_2d("./textures/moss_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(0.638283014f, 0.638283014f, 0.638283014f), ::base::mono_alpha, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 0.580000043f, ::math::lerp(0.800000012f, 0.180000007f, moss_moisture)), ::math::lerp(0.f, ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f)), moss_weight_1)) * ::math::lerp(::math::lerp(::math::lerp(0.459000021f, 1.f, ::base::file_texture(texture_2d("./textures/aggregate_exposed_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), 0.901000023f - ::math::clamp(remap(::base::file_texture(texture_2d("./textures/ground_aggregate_exposed_curv.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.5f, 1.f, 0.f, 1.f), 0.f, 1.f) * ::math::lerp(1.f, 0.f, pebble_tip_roughness), histogram_scan_small(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.179000005f, 0.553000033f)), histogram_range(float3(::base::file_texture(texture_2d("./textures/moss_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(0.638283014f, 0.638283014f, 0.638283014f), ::base::mono_alpha, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 0.580000043f, ::math::lerp(0.800000012f, 0.180000007f, moss_moisture)), ::math::lerp(0.f, ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f)), moss_weight_1)), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::df::diffuse_reflection_bsdf(::math::lerp(::base::file_texture(texture_2d("./textures/aggregate_exposed_diff.jpg", ::tex::gamma_srgb), color(0.f, 0.f, 0.f), color(::math::lerp(stone_brightness, 0.400000006f, 0.75f)), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, hue_shift(nvidia::core_definitions::blend_colors(::base::file_texture(texture_2d("./textures/moss_diff.jpg", ::tex::gamma_srgb), color(0.f, 0.f, 0.f), color(0.638283014f, 0.638283014f, 0.638283014f), ::base::mono_alpha, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, color(::math::pow(hsv2rgb(float3(0.2214614f, ::math::lerp(0.f, 0.699999988f, moss_saturation), ::math::lerp(0.175000012f, 0.699999988f, moss_brightness_remap))), 2.20000005f)), ::base::color_layer_overlay, 1.f).tint, 5.95100021f), moss_weight * ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f))), 0.f, ""), ::state::normal()), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(float3(0.f), 1.f, add_detail_normal(::math::lerp(::state::normal(), ::base::tangent_space_normal_texture(texture_2d("./textures/moss_norm.jpg", ::tex::gamma_linear), moss_bump_factor, false, false, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f), moss_weight * ::math::lerp(histogram_scan_big(::base::file_texture(texture_2d("./textures/HiLowNoise_D.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.379000008f, ::math::lerp(0.817000031f, 0.100000001f, evem_moss_distribution_amount)), 0.f, ::math::clamp(histogram_scan_big(::base::file_texture(texture_2d("./textures/aggregate_exposed_height.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono, 0.150000006f, ::math::lerp(0.200000003f, 0.680000007f, moss_height_growth)), 0.f, 1.f))), normalmap_normal(texture_2d("./textures/aggregate_exposed_norm.jpg", ::tex::gamma_linear), stones_bump_factor, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index))));
+    } in
+        material(
+            thin_walled: tmp0,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3,
+            volume: tmp4,
+            geometry: tmp5);
+
+
+export material Ground_Aggregate_Exposed_Matte(*)
+[[
+    ::anno::display_name("Ground Aggregate Exposed - Matte"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Exposed_Matte.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray"))
+]]
+= Ground_Aggregate_Exposed(
+	stone_brightness:				.6f,
+	pebble_tip_roughness:			1.0f,
+	stones_bump_factor:				1.00f,
+	moss_height_growth:				0.0f,
+	evem_moss_distribution_amount:	0.0f,
+	moss_saturation:				0.8f,
+	moss_brightness:				0.8f,
+	moss_moisture:					0.0f,
+	moss_weight:					0.0f,
+	moss_bump_factor:				1.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.0f,
+	texture_scale:					float2(1.0f),
+	uv_space_index:					0
+);
+
+
+export material Ground_Aggregate_Slightly_Mossy(*)
+[[
+    ::anno::display_name("Ground Aggregate Exposed - Slighty Mossy"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Slightly_Mossy.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray", "green", "multicolor"))
+]]
+= Ground_Aggregate_Exposed(
+	stone_brightness:				1.0f,
+	pebble_tip_roughness:			0.5f,
+	stones_bump_factor:				1.00f,
+	moss_height_growth:				0.55f,
+	evem_moss_distribution_amount:	1.0f,
+	moss_saturation:				0.88f,
+	moss_brightness:				0.8f,
+	moss_moisture:					0.0f,
+	moss_weight:					1.0f,
+	moss_bump_factor:				1.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.0f,
+	texture_scale:					float2(1.0f),
+	uv_space_index:					0
+);
+
+
+export material Ground_Aggregate_Heavy_Moss(*) 
+[[
+    ::anno::display_name("Ground Aggregate Exposed - Heavy Moss"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Heavy_Moss.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray", "green", "multicolor"))
+]]
+= Ground_Aggregate_Exposed(
+	stone_brightness:				1.0f,
+	pebble_tip_roughness:			0.5f,
+	stones_bump_factor:				1.00f,
+	moss_height_growth:				0.875f,
+	evem_moss_distribution_amount:	1.0f,
+	moss_saturation:				0.0f,
+	moss_brightness:				0.8f,
+	moss_moisture:					0.0f,
+	moss_weight:					1.0f,
+	moss_bump_factor:				1.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.0f,
+	texture_scale:					float2(1.0f),
+	uv_space_index:					0
+);
+
+
+export material Ground_Aggregate_Saturated_Moss_Patches(*)
+[[
+    ::anno::display_name("Ground Aggregate Exposed - Moss Patches"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Saturated_Moss_Patches.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray", "green", "multicolor"))
+]]
+= Ground_Aggregate_Exposed(
+	stone_brightness:				1.0f,
+	pebble_tip_roughness:			0.0f,
+	stones_bump_factor:				1.00f,
+	moss_height_growth:				0.9f,
+	evem_moss_distribution_amount:	0.524f,
+	moss_saturation:				0.85f,
+	moss_brightness:				0.8f,
+	moss_moisture:					0.0f,
+	moss_weight:					1.0f,
+	moss_bump_factor:				1.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.0f,
+	texture_scale:					float2(1.0f),
+	uv_space_index:					0
+);
+
+
+export material Ground_Aggregate_Charred_Moss(*)
+[[
+    ::anno::display_name("Ground Aggregate Exposed - Charred Moss"),
+    ::anno::description(DESCRIPTION),
+    ::anno::copyright_notice(COPYRIGHT),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::thumbnail("./.thumbs/Ground_Aggregate_Exposed.Ground_Aggregate_Charred_Moss.png"),
+	::anno::key_words(string[]("stone", "pebbles", "aggregate", "weathered", "rough", "construction", "architecture", "moss", "mossy", "dried", "nature", "layered", "outdoor", "ground", "multimaterial", "worn", "gray", "dark", "multicolor"))
+]]
+= Ground_Aggregate_Exposed(
+	stone_brightness:				1.0f,
+	pebble_tip_roughness:			0.8f,
+	stones_bump_factor:				1.00f,
+	moss_height_growth:				0.68f,
+	evem_moss_distribution_amount:	0.96f,
+	moss_saturation:				0.2f,
+	moss_brightness:				0.2f,
+	moss_moisture:					0.0f,
+	moss_weight:					1.0f,
+	moss_bump_factor:				1.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.0f,
+	texture_scale:					float2(1.0f),
+	uv_space_index:					0
+);
