@@ -47,11 +47,8 @@ from standalone.rsl_rl.ext.runners import OnPolicyRunner
 
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.utils.dict import print_dict
-from omni.isaac.lab_tasks.utils import get_checkpoint_path, parse_env_cfg
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import (
-    RslRlOnPolicyRunnerCfg,
-    RslRlVecEnvWrapper,
-)
+from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 # Import extensions to set up environment tasks
 import diff.lab # noqa: F401
 import diff.lab_tasks  # noqa: F401
