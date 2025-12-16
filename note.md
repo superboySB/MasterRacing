@@ -34,7 +34,7 @@ ISAACLAB_PATH=/workspace/isaaclab ${ISAACLAB_PATH}/isaaclab.sh -p .vscode/tools/
 - **Stage2 评测/导出（TRAINING_STAGE=2）**：与 Stage1 相同碰撞，噪声更大，episode 8s，无姿态惩罚；用于测试与导出。
 
 ## 训练与评测命令（按顺序执行）
-注意stage 0的1024个env就需要近13G显存, 3072个env就需要近xxG显存
+注意stage 0的1024个env就需要近13G显存, 4096个env就需要近37G显存
 
 资产已经放在仓库的 `assets/` 里（UIElements、PolyHaven 天空贴图、vMaterials_2/Ground/Asphalt_Fine.mdl），运行下面的命令无需再设置 `ISAAC_ASSET_ROOT` 或联网
 ```sh
@@ -48,12 +48,12 @@ export CARB_DISABLE_PYTHON_USDPREVIEW=1
 ```bash
 CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=0 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
   --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless \
-  --num_envs 3072 --experiment_name racing_stage0 --run_name s0
+  --num_envs 4096 --experiment_name racing_stage0 --run_name s0
 ```
 ### Stage1 硬碰撞（可从 Stage0 恢复）
 ```bash
 CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=1 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.rsl_rl.train \
-  --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless --num_envs 3072 \
+  --task DiffLab-Quadcopter-CTBR-Racing-v0 --headless --num_envs 4096 \
   --experiment_name racing_stage1 --run_name s1 \
   --resume True --load_run <stage0_run_dir> --checkpoint <ckpt.pt>
 ```
