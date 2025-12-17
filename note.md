@@ -81,9 +81,18 @@ CUDA_VISIBLE_DEVICES=0 TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m stand
   --video --video_length 400 --experiment_name racing \
   --load_run <run_dir> --checkpoint <ckpt.pt>
 ```
-示例：`--load_run 2025-12-16_01-33-08_s1 --checkpoint model_7998.pt`，应该能看到GUI和保存视频，录制会写到日志目录下`<run_dir>/videos/play/`，**但一直卡住不work**。
+示例：`--load_run 2025-12-16_01-33-08_s1 --checkpoint model_7998.pt`。
 
-然后再在服务器开始收集数据给后续的辅助任务
+说明：
+- 由于部分机器上 Isaac Sim GUI 在 `Starting the simulation...` 阶段可能卡死，这里的 `play/play_with_demo` 在检测到 `--show_camera` 时会默认切到稳定的 `--viz=camera`（强制 `--headless`），不再依赖 GUI。
+- 录制输出默认写到：`logs/rsl_rl/racing/<run_dir>/videos/play/`：
+  - `depth_<ckpt>.mp4`：RayCaster 前向深度可视化（分辨率 96×72，与策略网络输入一致）。
+  - 若 Matplotlib 在 Isaac Sim Python 内无 GUI backend，`--show_camera` 不会弹窗，而是周期性更新 `depth_live.png` 作为预览。
+- ONNX 导出在：`logs/rsl_rl/racing/<run_dir>/exported/vision_policy.onnx`。
+
+如必须看 Isaac Sim GUI，可显式加 `--viz gui`（但在部分环境下可能仍会卡死）。如需录制渲染 RGB，可改用 `--video_backend gym --enable_cameras`（更重，可能更容易卡死）。
+
+如果上面没问题了，然后再在服务器开始收集数据给后续的辅助任务
 ```sh
 CUDA_VISIBLE_DEVICES=7 TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m standalone.offline.data_collector \
   --task DiffLab-Quadcopter-CTBR-Racing-v0 --num_envs 2048 --video_length 400 --headless \
@@ -110,11 +119,18 @@ CUDA_VISIBLE_DEVICES=0 TRAINING_STAGE=2 ${ISAACLAB_PATH}/isaaclab.sh -p -m stand
   --video --video_length 400 --show_camera --experiment_name racing --use_auxiliary_head \
   --load_run <run_dir> --checkpoint policy_finetune_epoch-xxx.pt
 ```
-视频保存在 `logs/rsl_rl/racing/<run_dir>/videos/play/`；只想离屏评测时，可去掉 `--show_camera` 或加 `--headless`。
+视频保存在 `logs/rsl_rl/racing/<run_dir>/videos/play/`（默认生成 `depth_*.mp4`）；只想离屏评测时，可去掉 `--show_camera` 或显式加 `--headless`。
 
 若用了离线微调辅助头，则checkpoint设置的最后一行可以灵活处理，比如：`--checkpoint assets/trained_policy/offline_finetune/policy_finetune_epoch-2.pt`
 
 若用未offline微调策略，去掉 `--use_auxiliary_head`，checkpoint 换成在线 PPO 的 `model_xxxx.pt`，比如`--load_run 2025-12-16_01-33-08_s1 --checkpoint model_7998.pt`。
+
+`--use_auxiliary_head` 额外输出说明：
+
+- `auxiliary_prob.png`：辅助头 `sigmoid(aux_decoder(feats))` 的时间序列（横轴 timestep，纵轴概率），训练标签是 `cross_obs`（成功过门事件的二值信号）；曲线尖峰接近 1 时表示模型对“发生过门事件”的置信度很高。
+- `actions.png`：4 个子图依次是推力、wx、wy、wz 的动作时间序列（与训练时一致的 `tanh+scale` 映射）；推力约在 `[0, 3g]`，角速度约在 `[-6, 6] rad/s`，接近边界/突变通常代表更激进的操控或动作饱和。
+
+这两个文件会保存到当前 `--checkpoint` 文件所在目录（例如 `assets/trained_policy/offline_finetune/`），而不是 `logs/rsl_rl/...` 的 run 目录。
 
 <!-- ## 常见坑
 - 避免混用系统 python，与 Isaac Lab 交互统一用 `${ISAACLAB_PATH}/isaaclab.sh -p ...`。

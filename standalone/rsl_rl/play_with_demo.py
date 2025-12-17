@@ -3,6 +3,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
 
 from isaaclab.app import AppLauncher
 
@@ -20,14 +21,74 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--show_camera", action="store_true", default=False, help="Show camera of one environment.")
 parser.add_argument("--use_auxiliary_head", action="store_true", default=False, help="Use auxiliary head for vision policy.")
+parser.add_argument(
+    "--viz",
+    choices={"gui", "camera"},
+    default=None,
+    help=(
+        "Visualization backend. 'gui' uses Isaac Sim viewport (may be slow to start); "
+        "'camera' shows the front RayCasterCamera with matplotlib (forces --headless, avoids RTX/viewport). "
+        "Default: 'camera' when --show_camera, otherwise 'gui'."
+    ),
+)
+parser.add_argument(
+    "--video_backend",
+    choices={"gym", "imageio", "opencv"},
+    default=None,
+    help=(
+        "Video recording backend. 'gym' uses Gymnasium RecordVideo with Isaac Sim RGB rendering; "
+        "'imageio' records the front RayCasterCamera depth visualization to mp4; "
+        "'opencv' is deprecated (alias of 'imageio'). "
+        "Default: 'imageio' in --viz camera, otherwise 'gym'."
+    ),
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
-# always enable cameras to record video
-if args_cli.video:
+
+# Resolve defaults for viz/video backends.
+if args_cli.viz is None:
+    # If the user asked to "show camera", prefer the stable headless RayCaster preview by default.
+    if args_cli.show_camera:
+        args_cli.viz = "camera"
+    else:
+        args_cli.viz = "camera" if getattr(args_cli, "headless", False) else "gui"
+if args_cli.video_backend is None:
+    args_cli.video_backend = "imageio" if args_cli.viz == "camera" else "gym"
+elif args_cli.video_backend == "opencv":
+    print("[WARN] --video_backend=opencv is deprecated; using --video_backend=imageio instead.")
+    args_cli.video_backend = "imageio"
+
+# RGB rendering is only required for gym-based viewport recording.
+need_rgb_render = bool(args_cli.video and args_cli.video_backend == "gym")
+
+# In camera viz mode, we intentionally avoid Isaac Sim viewport/RTX to prevent startup stalls.
+if args_cli.viz == "camera":
+    args_cli.headless = True
+    # RayCasterCamera does not require RTX cameras / offscreen rendering. Force-disable by default for stability.
+    if not need_rgb_render:
+        os.environ["ENABLE_CAMERAS"] = "0"
+        args_cli.enable_cameras = False
+
+# Enable RTX cameras / rendering only when we need RGB frames (gym wrapper).
+if need_rgb_render:
     args_cli.enable_cameras = True
+    if getattr(args_cli, "rendering_mode", None) is None:
+        # Bias towards performance to reduce startup/rendering load.
+        args_cli.rendering_mode = "performance"
+
+if args_cli.viz == "camera":
+    print(
+        "[INFO] --viz=camera enabled: forcing --headless and visualizing via depth camera (no Isaac Sim viewport)."
+        f" video_backend={args_cli.video_backend}"
+    )
+else:
+    # Force GUI mode even if the user has `HEADLESS=1` in their environment.
+    os.environ["HEADLESS"] = "0"
+    if args_cli.show_camera:
+        print("[INFO] --show_camera: using Isaac Sim GUI viewport (no extra depth preview window).")
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -36,8 +97,11 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
 import torch
+
+import numpy as np
+import imageio.v2 as imageio
+from PIL import Image, ImageDraw
 
 from standalone.rsl_rl.ext.runners import OnPolicyRunner
 
@@ -52,11 +116,77 @@ from isaaclab_rl.rsl_rl import (
 )
 from standalone.rsl_rl.ext.utils import export_vision_policy_as_onnx
 from isaaclab.sensors import RayCasterCamera
-import cv2 as cv
 # Import extensions to set up environment tasks
 import diff.lab # noqa: F401
 import diff.lab_tasks  # noqa: F401
-from diff.lab.utils import visualize_depth
+
+def _visualize_depth(depth_map: np.ndarray, max_depth: float = 10.0, colored: bool = True) -> np.ndarray:
+    """Convert a depth map to a uint8 image (HxWx3 RGB if colored else HxW)."""
+    depth_map = np.nan_to_num(depth_map, nan=max_depth, posinf=max_depth, neginf=0.0)
+    depth_clipped = np.clip(depth_map, 0.0, max_depth)
+    depth_normalized = (depth_clipped / max_depth).astype(np.float32)
+
+    if not colored:
+        return (depth_normalized * 255.0).astype(np.uint8)
+
+    import matplotlib
+
+    cmap = matplotlib.colormaps.get_cmap("jet")
+    rgba = cmap(depth_normalized)  # HxWx4 float in [0, 1]
+    rgb = (rgba[:, :, :3] * 255.0).astype(np.uint8)
+    return rgb
+
+
+def _overlay_text_rgb(image_rgb: np.ndarray, text: str, xy: tuple[int, int] = (10, 10)) -> np.ndarray:
+    """Draw text with a black stroke onto an RGB uint8 image."""
+    pil_img = Image.fromarray(image_rgb)
+    draw = ImageDraw.Draw(pil_img)
+    draw.text(xy, text, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0))
+    return np.asarray(pil_img)
+
+
+def _pad_to_even_rgb(image_rgb: np.ndarray) -> np.ndarray:
+    """Pad an RGB image so width/height are even (required by many H.264 encoders)."""
+    height, width = image_rgb.shape[:2]
+    pad_h = height % 2
+    pad_w = width % 2
+    if pad_h == 0 and pad_w == 0:
+        return image_rgb
+    out = np.zeros((height + pad_h, width + pad_w, 3), dtype=image_rgb.dtype)
+    out[:height, :width] = image_rgb
+    if pad_h:
+        out[height:, :width] = image_rgb[height - 1 : height, :width]
+    if pad_w:
+        out[:height, width:] = image_rgb[:height, width - 1 : width]
+    if pad_h and pad_w:
+        out[height:, width:] = image_rgb[height - 1, width - 1]
+    return out
+
+
+def _try_init_matplotlib_viewer():
+    """Best-effort live viewer using matplotlib; returns (plt, fig, im) or (None, None, None)."""
+    try:
+        import matplotlib
+
+        if os.environ.get("DISPLAY"):
+            try:
+                matplotlib.use("TkAgg", force=True)
+            except Exception:
+                pass
+
+        import matplotlib.pyplot as plt
+
+        if matplotlib.get_backend().lower() == "agg":
+            return None, None, None
+
+        plt.ion()
+        fig, ax = plt.subplots(num="Depth (env 0)")
+        ax.set_axis_off()
+        im = ax.imshow(np.zeros((16, 16, 3), dtype=np.uint8))
+        fig.tight_layout(pad=0)
+        return plt, fig, im
+    except Exception:
+        return None, None, None
 
 def _resolve_resume_path(log_root_path, agent_cfg):
     """Resolve checkpoint path, allowing direct file or custom run directory."""
@@ -99,9 +229,11 @@ def main():
     log_dir = os.path.dirname(resume_path)
 
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    use_gym_video = args_cli.video and args_cli.video_backend == "gym"
+    use_imageio_video = args_cli.video and args_cli.video_backend == "imageio"
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if use_gym_video else None)
     # wrap for video recording
-    if args_cli.video:
+    if use_gym_video:
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
@@ -149,10 +281,45 @@ def main():
     )
 
     # reset environment
-    obs = env.get_observations()["policy"]
+    obs, _ = env.get_observations()
     timestep = 0
+    frame_index = 0
     prob = []
     actions_list = []
+
+    # Optional depth video recording (from RayCasterCamera).
+    depth_video_writer = None  # imageio Writer (dict wrapper)
+    depth_video_path = None
+    video_dir = None
+    ckpt_tag = None
+    fps = float(1.0 / env.unwrapped.step_dt)
+    record_depth_video = args_cli.viz == "camera" and use_imageio_video
+    need_camera_frames = args_cli.viz == "camera" and (args_cli.show_camera or record_depth_video)
+    if need_camera_frames:
+        video_dir = os.path.join(log_dir, "videos", "play")
+        os.makedirs(video_dir, exist_ok=True)
+        ckpt_tag = os.path.splitext(os.path.basename(resume_path))[0]
+        if record_depth_video:
+            depth_video_path = os.path.join(video_dir, f"depth_{ckpt_tag}.mp4")
+            depth_video_writer = {"fps": fps, "writer": None}
+    camera: RayCasterCamera | None = None
+    mpl_plt = None
+    mpl_fig = None
+    mpl_im = None
+    dump_preview_path = None
+    dump_preview_every = 5
+    if need_camera_frames:
+        camera = env.unwrapped.scene["front_camera"]
+
+        if args_cli.show_camera:
+            mpl_plt, mpl_fig, mpl_im = _try_init_matplotlib_viewer()
+            if mpl_plt is None:
+                dump_preview_path = os.path.join(video_dir or log_dir, "depth_live.png")
+                print(
+                    "[INFO] Matplotlib GUI backend unavailable in Isaac Sim Python (backend=Agg). "
+                    f"Writing a periodically-updated preview image: {dump_preview_path}"
+                )
+                args_cli.show_camera = False
     # simulate environment
     while simulation_app.is_running():
         # run everything in inference mode
@@ -162,31 +329,55 @@ def main():
             if args_cli.use_auxiliary_head:
                 prob.append(decoder(feats).sigmoid()[0].item())
             # env stepping
-            obs_dict, _, _, _ = env.step(actions)
-            obs = obs_dict["policy"]
+            obs, _, _, _ = env.step(actions)
             actions_list.append(actions[0])
+            frame_index += 1
+
+        if need_camera_frames and camera is not None:
+            depth = camera.data.output["distance_to_image_plane"]
+            depth_vis = _visualize_depth(
+                depth[0, :, :, 0].cpu().numpy(), max_depth=float(getattr(camera.cfg, "max_distance", 10.0)), colored=True
+            )
+            if args_cli.use_auxiliary_head and prob:
+                depth_vis = _overlay_text_rgb(depth_vis, f"CP: {prob[-1]:.2f}", xy=(10, 10))
+
+            if args_cli.show_camera and mpl_plt is not None and mpl_fig is not None and mpl_im is not None:
+                if not mpl_plt.fignum_exists(mpl_fig.number):
+                    args_cli.show_camera = False
+                else:
+                    mpl_im.set_data(depth_vis)
+                    mpl_fig.canvas.draw_idle()
+                    mpl_plt.pause(0.001)
+
+            if record_depth_video and isinstance(depth_video_writer, dict):
+                if depth_video_writer["writer"] is None:
+                    depth_video_writer["writer"] = imageio.get_writer(
+                        depth_video_path,
+                        fps=depth_video_writer["fps"],
+                        codec="libx264",
+                        quality=8,
+                        macro_block_size=None,
+                    )
+                depth_video_writer["writer"].append_data(_pad_to_even_rgb(depth_vis))
+
+            if dump_preview_path is not None and frame_index % dump_preview_every == 0:
+                imageio.imwrite(dump_preview_path, depth_vis)
+
         if args_cli.video:
             timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
-        if args_cli.show_camera:
-            camera: RayCasterCamera= env.unwrapped.scene['front_camera']
-            depth = camera.data.output["distance_to_image_plane"]
-            depth_vis = visualize_depth(depth[0, :, :, 0].cpu().numpy())
-            if args_cli.use_auxiliary_head:
-                # add probility text on the depth image
-                prob_text = f"CP: {prob[-1]:.2f}"
-                cv.putText(depth_vis, prob_text, (10, 10), cv.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
-            cv.imshow("Depth (env 0)", depth_vis)
-            cv.waitKey(1)
-            if len(prob)==300:
+            if timestep >= args_cli.video_length:
                 break
     # close the simulator
     env.close()
-    import matplotlib
-    matplotlib.use('Agg')
+    if mpl_plt is not None and mpl_fig is not None:
+        with np.errstate(all="ignore"):
+            mpl_plt.close(mpl_fig)
+    if record_depth_video and isinstance(depth_video_writer, dict) and depth_video_writer["writer"] is not None:
+        depth_video_writer["writer"].close()
+        if depth_video_path is not None:
+            print(f"[INFO] Depth video saved to: {depth_video_path}")
     import matplotlib.pyplot as plt
+    plt.ioff()
     # plot the probability of the auxiliary head
     if args_cli.use_auxiliary_head:
         plt.plot(prob)
