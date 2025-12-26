@@ -51,8 +51,6 @@ class ThrustController():
             [torch.ones(1, 4), self.t_BM_, self.kappa * torch.tensor([1, -1, 1, -1])]
         ).to(self.device)
         self.B_allocation_inv = torch.inverse(self.B_allocation)
-        self.B_allocation_T = self.B_allocation.transpose(0,1)
-        self.B_allocation_inv_T = self.B_allocation_inv.transpose(0,1)
 
         self.omega_realtime = torch.zeros([num_envs, 4],device=self.device)
     

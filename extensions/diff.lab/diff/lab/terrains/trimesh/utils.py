@@ -316,3 +316,63 @@ def make_cone(
     transform[0:3, 0:3] = tf.Rotation.from_euler("zyx", euler_zyx).as_matrix()
     # create the cone
     return trimesh.creation.cone(radius, height, sections=np.random.randint(4, 6), transform=transform)
+
+
+def visualize_all_shapes():
+    # 1. 初始化一个 Scene
+    scene = trimesh.Scene()
+
+    # --- 基础地面与边界 ---
+    # 创建一个 10x10 的平面 (Plane)
+    ground = make_plane(size=(10.0, 10.0), height=0.0)
+    scene.add_geometry(ground)
+
+    # 创建外围边界 (Border)
+    borders = make_border(size=(11.0, 11.0), inner_size=(10.0, 10.0), height=20.0, position=(0, 0, 0.25))
+    scene.add_geometry(borders)
+
+    # --- 各种物体 ---
+    # 2. 创建一个门 (Gate) - 放在中心稍微偏后的位置
+    gate_mesh = make_gate(outer_extents=[2, 2, 0.1], 
+                          inner_extents=[1.5, 1.5, 0.2], 
+                          position=[0, 3, 1], 
+                          rotation_angles=[0, 0, 0])
+    # 给 Mesh 上色以便区分
+    gate_mesh.visual.face_colors = [200, 50, 50, 255] # 红色
+    scene.add_geometry(gate_mesh)
+
+    # 3. 创建一面墙 (Wall)
+    wall_mesh = make_wall(size=[2, 1, 0.1], position=[-3, 0, 0.5], euler=[0, 0, 45])
+    wall_mesh.visual.face_colors = [50, 200, 50, 255] # 绿色
+    scene.add_geometry(wall_mesh)
+
+    # 4. 创建一些随机障碍物 (Orbits)
+    for i in range(5):
+        orbit = make_orbit(position=[random.uniform(-4, 4), random.uniform(-4, 4), 2.0], 
+                           euler=[random.uniform(0, 360) for _ in range(3)])
+        scene.add_geometry(orbit)
+
+    # 5. 地面高障碍物 (Ground High Obs)
+    high_obs = make_ground_high_obs(position=[3, -3, 0], euler=[0, 0, 0])
+    high_obs.visual.face_colors = [50, 50, 200, 255] # 蓝色
+    scene.add_geometry(high_obs)
+
+    # 6. 地面小物体 (Ground Little Obj)
+    for i in range(3):
+        little_obj = make_ground_little_obj(position=[random.uniform(-2, 2), -2, 0], euler=[0, 0, 0])
+        scene.add_geometry(little_obj)
+
+    # 7. 带有随机旋转的特定几何体
+    box = make_box(length=0.5, width=0.5, height=0.5, center=(2, 2, 0.5), max_yx_angle=30)
+    scene.add_geometry(box)
+
+    cylinder = make_cylinder(radius=0.2, height=0.8, center=(-2, 2, 0.4), max_yx_angle=20)
+    scene.add_geometry(cylinder)
+
+    # --- 显示场景 ---
+    print("正在启动 trimesh 可视化窗口...")
+    scene.show()
+
+if __name__ == "__main__":
+    # 执行可视化
+    visualize_all_shapes()

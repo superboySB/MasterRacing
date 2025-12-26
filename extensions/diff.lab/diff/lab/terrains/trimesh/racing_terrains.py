@@ -5,7 +5,10 @@ if TYPE_CHECKING:
 import numpy as np
 import scipy.spatial.transform as tf
 from isaaclab.terrains.trimesh.utils import make_border
-from .utils import *
+from .utils import (
+    make_gate, make_wall, make_orbit, make_ground_high_obs, make_ground_little_obj,
+)
+import trimesh
 import random
 
 

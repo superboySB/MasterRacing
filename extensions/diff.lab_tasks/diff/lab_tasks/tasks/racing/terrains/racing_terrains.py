@@ -17,14 +17,14 @@ from isaaclab.terrains import TerrainGeneratorCfg
 # NOTE num_gate should be same
 RacingComplexTerrainCfg = TerrainGeneratorCfg(
     seed=42,
-    size=(40.0, 40.0),
-    num_rows=10,
-    num_cols=20,
+    size=(30.0, 30.0),
+    num_rows=1,
+    num_cols=2,
     border_width=20.0,
-    horizontal_scale=0.1,
+    horizontal_scale=0.25,
     vertical_scale=0.005,
     slope_threshold=0.75,
-    use_cache=False,
+    use_cache=True,
     sub_terrains={
         "zigzag": ZigzagRacingTerrainCfg(
             proportion=0.3,
@@ -36,7 +36,7 @@ RacingComplexTerrainCfg = TerrainGeneratorCfg(
             pos_z_noise_scale=[0.1, 1.0],
             rot_noise_scale=[0.0, 30.0],
             only_yaw=True,
-            num_wall_seg=[1, 4],
+            num_wall_seg=[1, 2],
             wall_size=[0.4, 1.0],
             wall_thickness=[0.04, 0.08],
             num_orbit_seg=[1, 4],
@@ -77,7 +77,7 @@ RacingComplexTerrainCfg = TerrainGeneratorCfg(
             pos_noise_scale=[0.2, 1.0],
             rot_noise_scale=[0.0, 30.0],
             only_yaw=True,
-            num_wall_seg=[1, 4],
+            num_wall_seg=[1, 2],
             wall_size=[0.4, 1.0],
             wall_thickness=[0.04, 0.08],
             num_orbit_seg=[1, 4],

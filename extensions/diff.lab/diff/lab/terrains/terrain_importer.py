@@ -7,9 +7,11 @@ import numpy as np
 import trimesh
 from pxr import UsdGeom
 from isaaclab.utils.warp import convert_to_warp_mesh, raycast_mesh
-from diff.lab.utils.utils import create_prim_from_mesh
+# from diff.lab.utils.utils import create_prim_from_mesh
+from isaaclab.terrains.utils import create_prim_from_mesh
 from .trimesh.utils import make_plane
-import warp
+
+
 class TerrainImporter(terrain_importer):
     def __init__(self, cfg: TerrainImporterCfg):
         """Initialize the terrain importer.
@@ -144,6 +146,7 @@ class TerrainImporter(terrain_importer):
             visual_material=self.cfg.visual_material,
             physics_material=self.cfg.physics_material,
         )
+
 
     def import_usd(self, key: str, usd_path: str):
         """Import a mesh from a USD file.

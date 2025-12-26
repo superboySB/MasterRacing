@@ -8,7 +8,7 @@ import os
 from isaaclab.app import AppLauncher
 
 # local imports
-from . import cli_args  # isort: skip
+from standalone.rsl_rl import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -281,7 +281,7 @@ def main():
     )
 
     # reset environment
-    obs, _ = env.get_observations()
+    policy_obs = env.get_observations()['policy']
     timestep = 0
     frame_index = 0
     prob = []
@@ -325,13 +325,14 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions, feats = policy(obs)
+            actions, feats = policy(policy_obs)
             if args_cli.use_auxiliary_head:
                 prob.append(decoder(feats).sigmoid()[0].item())
             # env stepping
             obs, _, _, _ = env.step(actions)
             actions_list.append(actions[0])
             frame_index += 1
+            policy_obs = obs['policy']
 
         if need_camera_frames and camera is not None:
             depth = camera.data.output["distance_to_image_plane"]
@@ -386,16 +387,16 @@ def main():
         plt.title("Probability of the auxiliary head")
         plt.savefig(os.path.join(log_dir, "auxiliary_prob.png"))
         # plot actions
-        actions_list = torch.stack(actions_list)
+        Actions = torch.stack(actions_list)
         plt.figure()
         plt.subplot(4, 1, 1)
-        plt.plot((actions_list[:, 0].tanh() * 1.5 * 9.81 + 1.5 * 9.81).cpu().numpy(), label="thrust")
+        plt.plot((Actions[:, 0].tanh() * 1.5 * 9.81 + 1.5 * 9.81).cpu().numpy(), label="thrust")
         plt.subplot(4, 1, 2)
-        plt.plot((actions_list[:, 1].tanh() * 6).cpu().numpy(), label="wx")
+        plt.plot((Actions[:, 1].tanh() * 6).cpu().numpy(), label="wx")
         plt.subplot(4, 1, 3)
-        plt.plot((actions_list[:, 2].tanh() * 6).cpu().numpy(), label="wy")
+        plt.plot((Actions[:, 2].tanh() * 6).cpu().numpy(), label="wy")
         plt.subplot(4, 1, 4)
-        plt.plot((actions_list[:, 3].tanh() * 6).cpu().numpy(), label="wz")
+        plt.plot((Actions[:, 3].tanh() * 6).cpu().numpy(), label="wz")
         plt.title("Actions")
         plt.savefig(os.path.join(log_dir, "actions.png"))
 

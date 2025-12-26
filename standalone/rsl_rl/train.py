@@ -15,7 +15,7 @@ import isaacsim
 import isaaclab
 
 # local imports
-from . import cli_args  # isort: skip
+from standalone.rsl_rl import cli_args  # isort: skip
 
 
 # add argparse arguments

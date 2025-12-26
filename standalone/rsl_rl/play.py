@@ -8,7 +8,7 @@ import os
 from isaaclab.app import AppLauncher
 
 # local imports
-from . import cli_args  # isort: skip
+from standalone.rsl_rl import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -252,7 +252,7 @@ def main():
     )
 
     # reset environment
-    obs, _ = env.get_observations()
+    obs = env.get_observations()
     timestep = 0
     frame_index = 0
 
